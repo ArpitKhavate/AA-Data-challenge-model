@@ -9,6 +9,7 @@ import {
   Marker,
   ZoomableGroup,
 } from "react-simple-maps";
+import { geoAlbersUsa } from "d3-geo";
 import {
   getAirportCoords,
   getAllPairs,
@@ -46,6 +47,8 @@ import {
 
 const GEO_URL = "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json";
 const SEASONS = ["Spring", "Summer", "Fall", "Winter"];
+const MAP_W = 960;
+const MAP_H = 600;
 
 interface PopupState {
   code: string;
@@ -53,30 +56,29 @@ interface PopupState {
   y: number;
 }
 
-/* ---- Curved path helpers ---- */
+/* ---- Projection (must match ComposableMap internals) ---- */
+const mapProjection = geoAlbersUsa().translate([MAP_W / 2, MAP_H / 2]);
 
-/** Compute a quadratic bezier control point for a nice flight arc */
-function getArcControlPoint(
+function proj(lon: number, lat: number): [number, number] | null {
+  return mapProjection([lon, lat]) as [number, number] | null;
+}
+
+/* ---- Curved path helpers (works in projected pixel space) ---- */
+
+function buildArcPath(
   from: [number, number],
   to: [number, number]
-): [number, number] {
+): string {
   const midX = (from[0] + to[0]) / 2;
   const midY = (from[1] + to[1]) / 2;
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const dist = Math.sqrt(dx * dx + dy * dy);
-  // Arc height proportional to distance — flights curve more for longer routes
-  const arcHeight = Math.min(dist * 0.35, 12);
-  // Perpendicular offset — always curve upward (negative Y in geo coords = northward)
-  const nx = -dy / dist;
-  const ny = dx / dist;
-  return [midX + nx * arcHeight, midY - Math.abs(ny * arcHeight) - arcHeight * 0.3];
-}
-
-/** Build SVG path string for the arc */
-function buildArcPath(from: [number, number], to: [number, number]): string {
-  const cp = getArcControlPoint(from, to);
-  return `M ${from[0]},${from[1]} Q ${cp[0]},${cp[1]} ${to[0]},${to[1]}`;
+  const arcHeight = Math.min(dist * 0.25, 80);
+  // Control point: offset upward (negative Y in SVG = up)
+  const cpX = midX;
+  const cpY = midY - arcHeight;
+  return `M ${from[0]},${from[1]} Q ${cpX},${cpY} ${to[0]},${to[1]}`;
 }
 
 /** Compute zoom center between an airport and DFW */
@@ -174,29 +176,8 @@ export default function FlightMapPage() {
     [metars, airportB]
   );
 
-  // Zoom to selected airports
-  useEffect(() => {
-    if (airportA && airportB) {
-      const a = coordMap[airportA];
-      const b = coordMap[airportB];
-      if (a && b) {
-        setMapCenter([(a.lon + b.lon) / 2, (a.lat + b.lat) / 2]);
-        setMapZoom(2.2);
-      }
-    } else if (airportA) {
-      const a = coordMap[airportA];
-      if (a) {
-        setMapCenter(getZoomCenter(a));
-        setMapZoom(2);
-      }
-    } else if (airportB) {
-      const b = coordMap[airportB];
-      if (b) {
-        setMapCenter(getZoomCenter(b));
-        setMapZoom(2);
-      }
-    }
-  }, [airportA, airportB, coordMap]);
+  // Zoom orchestration — managed by setInbound/setOutbound, not by a useEffect
+  // (removed auto-zoom effect to give full control to the callbacks)
 
   // Handle clicking an airport dot
   const handleDotClick = useCallback(
@@ -215,24 +196,46 @@ export default function FlightMapPage() {
     []
   );
 
+  // Ref to hold zoom-out timer so we can cancel if outbound is picked quickly
+  const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Set as inbound (Airport A)
   const setInbound = useCallback(
     (code: string) => {
       setAirportA(code);
       setPopup(null);
       setPathKey((k) => k + 1);
+
+      // Cancel any pending zoom-out from a previous inbound pick
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+
+      const a = coordMap[code];
+      if (!a) return;
+
       if (airportB && code !== airportB) {
-        setTimeout(
-          () =>
+        // Both selected — zoom to show both, hold 2s, then scroll
+        const b = coordMap[airportB];
+        if (b) {
+          setMapCenter([(a.lon + b.lon) / 2, (a.lat + b.lat) / 2]);
+          setMapZoom(2.2);
+          setTimeout(() => {
             resultsRef.current?.scrollIntoView({
               behavior: "smooth",
               block: "start",
-            }),
-          300
-        );
+            });
+          }, 2000);
+        }
+      } else {
+        // Only inbound selected — zoom in briefly, hold 2s, then zoom back out
+        setMapCenter(getZoomCenter(a));
+        setMapZoom(2.2);
+        zoomTimerRef.current = setTimeout(() => {
+          setMapZoom(1);
+          setMapCenter([-96, 38]);
+        }, 2000);
       }
     },
-    [airportB]
+    [airportB, coordMap]
   );
 
   // Set as outbound (Airport B)
@@ -241,24 +244,44 @@ export default function FlightMapPage() {
       setAirportB(code);
       setPopup(null);
       setPathKey((k) => k + 1);
+
+      // Cancel any pending zoom-out timer from inbound
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+
+      const b = coordMap[code];
+      if (!b) return;
+
       if (airportA && code !== airportA) {
-        setTimeout(
-          () =>
+        // Both selected — zoom to show both paths, hold 2s, then scroll
+        const a = coordMap[airportA];
+        if (a) {
+          setMapCenter([(a.lon + b.lon) / 2, (a.lat + b.lat) / 2]);
+          setMapZoom(2.2);
+          setTimeout(() => {
             resultsRef.current?.scrollIntoView({
               behavior: "smooth",
               block: "start",
-            }),
-          300
-        );
+            });
+          }, 2000);
+        }
+      } else {
+        // Only outbound selected — zoom in briefly, hold 2s, then zoom back out
+        setMapCenter(getZoomCenter(b));
+        setMapZoom(2.2);
+        zoomTimerRef.current = setTimeout(() => {
+          setMapZoom(1);
+          setMapCenter([-96, 38]);
+        }, 2000);
       }
     },
-    [airportA]
+    [airportA, coordMap]
   );
 
   const closePopup = useCallback(() => setPopup(null), []);
 
   // FULL RESET
   const resetAll = useCallback(() => {
+    if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
     setAirportA(null);
     setAirportB(null);
     setPopup(null);
@@ -267,9 +290,17 @@ export default function FlightMapPage() {
     setPathKey((k) => k + 1);
   }, []);
 
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => { if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current); };
+  }, []);
+
   const bothSelected = !!airportA && !!airportB && airportA !== airportB;
 
-  // Build arc paths for selected airports
+  // Project DFW once
+  const dfwPx = useMemo(() => proj(DFW_COORD.lon, DFW_COORD.lat), []);
+
+  // Build arc paths in PROJECTED pixel space
   const arcPaths = useMemo(() => {
     const paths: {
       id: string;
@@ -277,41 +308,40 @@ export default function FlightMapPage() {
       color: string;
       type: "inbound" | "outbound";
     }[] = [];
+    if (!dfwPx) return paths;
 
     if (airportA) {
       const a = coordMap[airportA];
       if (a) {
-        // Inbound: Airport A → DFW (blue)
-        paths.push({
-          id: `arc-inbound-${airportA}-${pathKey}`,
-          d: buildArcPath(
-            [a.lon, a.lat],
-            [DFW_COORD.lon, DFW_COORD.lat]
-          ),
-          color: "#0078D2",
-          type: "inbound",
-        });
+        const aPx = proj(a.lon, a.lat);
+        if (aPx) {
+          paths.push({
+            id: `arc-inbound-${airportA}-${pathKey}`,
+            d: buildArcPath(aPx, dfwPx),
+            color: "#0078D2",
+            type: "inbound",
+          });
+        }
       }
     }
 
     if (airportB) {
       const b = coordMap[airportB];
       if (b) {
-        // Outbound: DFW → Airport B (red)
-        paths.push({
-          id: `arc-outbound-${airportB}-${pathKey}`,
-          d: buildArcPath(
-            [DFW_COORD.lon, DFW_COORD.lat],
-            [b.lon, b.lat]
-          ),
-          color: "#C8102E",
-          type: "outbound",
-        });
+        const bPx = proj(b.lon, b.lat);
+        if (bPx) {
+          paths.push({
+            id: `arc-outbound-${airportB}-${pathKey}`,
+            d: buildArcPath(dfwPx, bPx),
+            color: "#C8102E",
+            type: "outbound",
+          });
+        }
       }
     }
 
     return paths;
-  }, [airportA, airportB, coordMap, pathKey]);
+  }, [airportA, airportB, coordMap, pathKey, dfwPx]);
 
   if (loading) {
     return (
@@ -411,30 +441,30 @@ export default function FlightMapPage() {
               >
                 {/* Top bar */}
                 <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 px-4 py-2.5">
-                  <span className="flex items-center gap-1.5 rounded-sm bg-white/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider border border-[#0A1A3A]/8">
+                  <span className="flex items-center gap-1.5 rounded-sm bg-[#0A1A3A]/60 backdrop-blur px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/80 border border-white/10">
                     <span className="h-2 w-2 rounded-full bg-[#C8102E] animate-pulse" />
                     {coords.length} Airports
                   </span>
-                  <span className="rounded-sm bg-white/90 px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider border border-[#0A1A3A]/8">
+                  <span className="rounded-sm bg-[#0A1A3A]/60 backdrop-blur px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-white/80 border border-white/10">
                     Hub: DFW
                   </span>
                   {airportA && (
-                    <span className="rounded-sm bg-[#0078D2]/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-[#0078D2] border border-[#0078D2]/20">
+                    <span className="rounded-sm bg-[#0078D2]/20 backdrop-blur px-2.5 py-1 text-[10px] font-mono font-semibold text-[#5CB8FF] border border-[#0078D2]/30">
                       A: {airportA}
                     </span>
                   )}
                   {airportB && (
-                    <span className="rounded-sm bg-[#C8102E]/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-[#C8102E] border border-[#C8102E]/20">
+                    <span className="rounded-sm bg-[#C8102E]/20 backdrop-blur px-2.5 py-1 text-[10px] font-mono font-semibold text-[#FF6B7A] border border-[#C8102E]/30">
                       B: {airportB}
                     </span>
                   )}
                   {(airportA || airportB) && (
                     <button
                       onClick={resetAll}
-                      className="ml-auto flex h-6 w-6 items-center justify-center rounded bg-[#0A1A3A]/5 hover:bg-[#0A1A3A]/10 transition-colors"
+                      className="ml-auto flex h-6 w-6 items-center justify-center rounded bg-white/10 hover:bg-white/20 transition-colors"
                       title="Reset map"
                     >
-                      <X className="h-3 w-3 text-[#6B7B8D]" />
+                      <X className="h-3 w-3 text-white/60" />
                     </button>
                   )}
                 </div>
@@ -442,23 +472,26 @@ export default function FlightMapPage() {
                 {/* SVG Map */}
                 <ComposableMap
                   projection="geoAlbersUsa"
-                  width={960}
-                  height={600}
+                  width={MAP_W}
+                  height={MAP_H}
                   style={{ width: "100%", height: "100%" }}
                 >
                   <defs>
-                    {/* Glow filter for flight paths */}
-                    <filter id="glow-filter" x="-50%" y="-50%" width="200%" height="200%">
-                      <feGaussianBlur stdDeviation="3" result="blur" />
-                      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    {/* Single lightweight glow — reused everywhere */}
+                    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+                      <feGaussianBlur stdDeviation="3" />
                     </filter>
-                    <filter id="glow-filter-wide" x="-50%" y="-50%" width="200%" height="200%">
-                      <feGaussianBlur stdDeviation="6" result="blur" />
-                      <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
+                    {/* Radial gradient for comet head */}
+                    <radialGradient id="comet-blue">
+                      <stop offset="0%" stopColor="#FFFFFF" stopOpacity="1" />
+                      <stop offset="40%" stopColor="#5CB8FF" stopOpacity="0.6" />
+                      <stop offset="100%" stopColor="#0078D2" stopOpacity="0" />
+                    </radialGradient>
+                    <radialGradient id="comet-red">
+                      <stop offset="0%" stopColor="#FFFFFF" stopOpacity="1" />
+                      <stop offset="40%" stopColor="#FF6B7A" stopOpacity="0.6" />
+                      <stop offset="100%" stopColor="#C8102E" stopOpacity="0" />
+                    </radialGradient>
                   </defs>
 
                   <ZoomableGroup
@@ -471,160 +504,129 @@ export default function FlightMapPage() {
                       setMapZoom(zoom);
                     }}
                   >
-                    {/* State outlines */}
+                    {/* State outlines — pointer-events disabled for performance */}
                     <Geographies geography={GEO_URL}>
                       {({ geographies }) =>
                         geographies.map((geo) => (
                           <Geography
                             key={geo.rpiKey || geo.properties?.name}
                             geography={geo}
-                            fill="#C5CED6"
-                            stroke="#D8DFE5"
+                            fill="#243B5C"
+                            stroke="#2E4A6E"
                             strokeWidth={0.5}
                             style={{
-                              default: { outline: "none" },
-                              hover: { outline: "none", fill: "#B8C4CE" },
-                              pressed: { outline: "none" },
+                              default: { outline: "none", cursor: "default" },
+                              hover: { outline: "none", fill: "#243B5C", cursor: "default" },
+                              pressed: { outline: "none", cursor: "default" },
                             }}
                           />
                         ))
                       }
                     </Geographies>
 
-                    {/* Subtle background lines when nothing selected */}
-                    {!airportA &&
-                      !airportB &&
-                      coords.map((ap) => (
-                        <line
-                          key={`bg-${ap.code}`}
-                          x1={0}
-                          y1={0}
-                          x2={0}
-                          y2={0}
-                          stroke="#A0ADB8"
-                          strokeWidth={0.3}
-                          strokeOpacity={0.15}
-                        >
-                          {/* Invisible placeholder — the Marker positions handle it */}
-                        </line>
-                      ))}
-
                     {/* ---- ANIMATED CURVED FLIGHT PATHS ---- */}
-                    {arcPaths.map((arc) => (
-                      <g key={arc.id}>
-                        {/* Wide glow background */}
-                        <path
-                          d={arc.d}
-                          fill="none"
-                          stroke={arc.color}
-                          strokeWidth={8}
-                          strokeOpacity={0.15}
-                          strokeLinecap="round"
-                          className="flight-path-glow"
-                        />
-                        {/* Medium glow */}
-                        <path
-                          d={arc.d}
-                          fill="none"
-                          stroke={arc.color}
-                          strokeWidth={4}
-                          strokeOpacity={0.3}
-                          strokeLinecap="round"
-                          filter="url(#glow-filter)"
-                        />
-                        {/* Core beam — animated dash */}
-                        <path
-                          d={arc.d}
-                          fill="none"
-                          stroke={arc.color}
-                          strokeWidth={2.5}
-                          strokeOpacity={0.9}
-                          strokeLinecap="round"
-                          className="flight-path-beam"
-                        />
-                        {/* Animated plane dot traveling along path */}
-                        <circle r={4} fill={arc.color} className="flight-plane-dot">
-                          <animateMotion
-                            dur="3s"
-                            repeatCount="indefinite"
-                            path={arc.d}
-                          />
-                        </circle>
-                        {/* Trailing glow dot */}
-                        <circle r={8} fill={arc.color} opacity={0.15}>
-                          <animateMotion
-                            dur="3s"
-                            repeatCount="indefinite"
-                            path={arc.d}
-                          />
-                        </circle>
-                      </g>
-                    ))}
+                    {arcPaths.map((arc) => {
+                      const isBlue = arc.type === "inbound";
+                      const bright = isBlue ? "#5CB8FF" : "#FF6B7A";
+                      const comet = isBlue ? "url(#comet-blue)" : "url(#comet-red)";
 
-                    {/* DFW hub — glowing */}
+                      return (
+                        <g key={arc.id} className="beam-group">
+                          {/* Glow layer (wide, soft) */}
+                          <path
+                            d={arc.d}
+                            fill="none"
+                            stroke={arc.color}
+                            strokeWidth={8}
+                            strokeLinecap="round"
+                            pathLength={1}
+                            className="beam-glow"
+                          />
+                          {/* Core beam (bright, shoots in) */}
+                          <path
+                            d={arc.d}
+                            fill="none"
+                            stroke={bright}
+                            strokeWidth={2.5}
+                            strokeLinecap="round"
+                            pathLength={1}
+                            className="beam-core"
+                          />
+                          {/* White center highlight */}
+                          <path
+                            d={arc.d}
+                            fill="none"
+                            stroke="#FFFFFF"
+                            strokeWidth={0.8}
+                            strokeLinecap="round"
+                            pathLength={1}
+                            className="beam-white"
+                          />
+                          {/* Glowing plane traveling along the arc */}
+                          <g className="traveling-plane">
+                            {/* Halo glow behind the plane */}
+                            <circle r={8} fill={comet} opacity={0.4} filter="url(#glow)">
+                              <animateMotion dur="3s" repeatCount="indefinite" path={arc.d} rotate="auto" />
+                            </circle>
+                            {/* Top-down airplane silhouette — nose points right (+x) */}
+                            <g fill="#FFFFFF" opacity={0.92}>
+                              <animateMotion dur="3s" repeatCount="indefinite" path={arc.d} rotate="auto" />
+                              <g transform="scale(0.55)">
+                                {/* Fuselage */}
+                                <ellipse cx="0" cy="0" rx="10" ry="2.2" />
+                                {/* Left wing */}
+                                <polygon points="2,-2 -2,-2 -5,-10 -3,-10" />
+                                {/* Right wing */}
+                                <polygon points="2,2 -2,2 -5,10 -3,10" />
+                                {/* Left engine */}
+                                <ellipse cx="-3" cy="-7" rx="2" ry="0.9" />
+                                {/* Right engine */}
+                                <ellipse cx="-3" cy="7" rx="2" ry="0.9" />
+                                {/* Left horizontal stabilizer */}
+                                <polygon points="-7,-2 -9,-2 -10,-5 -8,-5" />
+                                {/* Right horizontal stabilizer */}
+                                <polygon points="-7,2 -9,2 -10,5 -8,5" />
+                                {/* Nose highlight */}
+                                <ellipse cx="8" cy="0" rx="2.5" ry="1.4" fill="#FFFFFF" opacity="0.5" />
+                              </g>
+                            </g>
+                          </g>
+                        </g>
+                      );
+                    })}
+
+                    {/* DFW hub */}
                     <Marker
                       coordinates={[DFW_COORD.lon, DFW_COORD.lat]}
                     >
-                      <circle r={14} fill="#C8102E" opacity={0.08}>
-                        <animate
-                          attributeName="r"
-                          values="10;18;10"
-                          dur="3s"
-                          repeatCount="indefinite"
-                        />
-                        <animate
-                          attributeName="opacity"
-                          values="0.1;0;0.1"
-                          dur="3s"
-                          repeatCount="indefinite"
-                        />
-                      </circle>
-                      <circle r={8} fill="#C8102E" opacity={0.15}>
-                        <animate
-                          attributeName="r"
-                          values="6;12;6"
-                          dur="2.5s"
-                          repeatCount="indefinite"
-                        />
-                        <animate
-                          attributeName="opacity"
-                          values="0.2;0.05;0.2"
-                          dur="2.5s"
-                          repeatCount="indefinite"
-                        />
-                      </circle>
-                      <circle
-                        r={5}
-                        fill="#C8102E"
-                        stroke="#FFFFFF"
-                        strokeWidth={1.5}
-                      />
+                      <circle r={10} fill="#FFFFFF" opacity={0.06} />
+                      <circle r={5} fill="#FFFFFF" stroke="#C8102E" strokeWidth={2} className="dfw-dot" />
                       <text
                         textAnchor="middle"
                         y={-11}
                         style={{
-                          fill: "#C8102E",
+                          fill: "#FFFFFF",
                           fontSize: 9,
                           fontWeight: 800,
                           fontFamily: "var(--font-geist-mono)",
                         }}
-                        className="airport-label"
+                        className="airport-label-hub"
                       >
                         DFW
                       </text>
                     </Marker>
 
-                    {/* Airport dots */}
+                    {/* Airport dots — no per-dot animations for perf */}
                     {coords.map((ap) => {
                       const isA = ap.code === airportA;
                       const isB = ap.code === airportB;
                       const isSelected = isA || isB;
                       const dimmed = bothSelected && !isSelected;
                       const dotColor = isA
-                        ? "#0078D2"
+                        ? "#5CB8FF"
                         : isB
-                        ? "#C8102E"
-                        : "#0A1A3A";
+                        ? "#FF6B7A"
+                        : "#FFFFFF";
                       const dotR = isSelected ? 4.5 : 2.5;
 
                       return (
@@ -632,68 +634,28 @@ export default function FlightMapPage() {
                           key={`dot-${ap.code}`}
                           coordinates={[ap.lon, ap.lat]}
                         >
-                          {/* Glow halo */}
-                          <circle
-                            r={dimmed ? 0 : 8}
-                            fill={dotColor}
-                            opacity={0}
-                          >
-                            <animate
-                              attributeName="r"
-                              values={
-                                isSelected ? "5;14;5" : "4;10;4"
-                              }
-                              dur={isSelected ? "2s" : "3.5s"}
-                              repeatCount="indefinite"
-                            />
-                            <animate
-                              attributeName="opacity"
-                              values={
-                                isSelected
-                                  ? "0.25;0;0.25"
-                                  : "0.08;0;0.08"
-                              }
-                              dur={isSelected ? "2s" : "3.5s"}
-                              repeatCount="indefinite"
-                            />
-                          </circle>
+                          {/* Static halo — only visible when selected */}
                           {isSelected && (
                             <circle
-                              r={6}
+                              r={12}
                               fill={dotColor}
-                              opacity={0}
-                            >
-                              <animate
-                                attributeName="r"
-                                values="4;20;4"
-                                dur="2.5s"
-                                repeatCount="indefinite"
-                              />
-                              <animate
-                                attributeName="opacity"
-                                values="0.15;0;0.15"
-                                dur="2.5s"
-                                repeatCount="indefinite"
-                              />
-                            </circle>
+                              opacity={0.12}
+                              className="selected-halo"
+                            />
                           )}
+                          {/* Soft static glow ring */}
                           <circle
-                            r={isSelected ? 9 : 5}
+                            r={isSelected ? 7 : 4}
                             fill={dotColor}
-                            opacity={
-                              dimmed
-                                ? 0.02
-                                : isSelected
-                                ? 0.12
-                                : 0.04
-                            }
+                            opacity={dimmed ? 0.01 : isSelected ? 0.15 : 0.06}
                           />
+                          {/* Core dot */}
                           <circle
                             r={dotR}
                             fill={dotColor}
                             stroke={isSelected ? "#FFFFFF" : "none"}
-                            strokeWidth={isSelected ? 1.5 : 0}
-                            opacity={dimmed ? 0.12 : 0.85}
+                            strokeWidth={isSelected ? 1.2 : 0}
+                            opacity={dimmed ? 0.06 : 1}
                             className="airport-dot"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -703,29 +665,22 @@ export default function FlightMapPage() {
                               );
                             }}
                           />
+                          {/* Label — only show for selected or on hover via CSS */}
                           <text
                             textAnchor="middle"
                             y={-9}
                             style={{
-                              fill: isA
-                                ? "#0078D2"
-                                : isB
-                                ? "#C8102E"
-                                : "#6B7B8D",
+                              fill: dotColor,
                               fontSize: isSelected ? 8 : 6,
                               fontWeight: isSelected ? 800 : 600,
                               fontFamily: "var(--font-geist-mono)",
                               opacity: dimmed
-                                ? 0.08
+                                ? 0.04
                                 : isSelected
                                 ? 1
-                                : 0.5,
+                                : 0.6,
                             }}
-                            className={
-                              isSelected
-                                ? "airport-label-selected"
-                                : "airport-label"
-                            }
+                            className="airport-label"
                           >
                             {ap.code}
                           </text>
@@ -772,36 +727,36 @@ export default function FlightMapPage() {
                 <div className="map-bottom-bar absolute bottom-0 left-0 right-0">
                   <div className="flex items-center gap-6">
                     <div>
-                      <span className="text-[10px] uppercase tracking-wider text-[#6B7B8D]">
+                      <span className="text-[10px] uppercase tracking-wider text-white/40">
                         Historical
                       </span>
-                      <span className="ml-2 font-mono text-base font-bold">
+                      <span className="ml-2 font-mono text-base font-bold text-white">
                         {result ? result.r.toFixed(2) : "—"}
                       </span>
                     </div>
                     {liveRisk && liveRisk.multiplier > 1 && (
                       <div>
-                        <span className="text-[10px] uppercase tracking-wider text-[#C8102E]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#FF6B7A]">
                           Live-Adj
                         </span>
-                        <span className="ml-2 font-mono text-base font-bold text-[#C8102E]">
+                        <span className="ml-2 font-mono text-base font-bold text-[#FF6B7A]">
                           {liveRisk.adjusted.toFixed(2)}
                         </span>
                       </div>
                     )}
                     <div>
-                      <span className="text-[10px] uppercase tracking-wider text-[#6B7B8D]">
+                      <span className="text-[10px] uppercase tracking-wider text-white/40">
                         Confidence
                       </span>
-                      <span className="ml-2 font-mono text-base font-bold">
+                      <span className="ml-2 font-mono text-base font-bold text-white">
                         {result ? `${calibrateConfidence(result.c).toFixed(0)}%` : "—"}
                       </span>
                     </div>
                     <div>
-                      <span className="text-[10px] uppercase tracking-wider text-[#6B7B8D]">
+                      <span className="text-[10px] uppercase tracking-wider text-white/40">
                         Model
                       </span>
-                      <span className="ml-2 font-mono text-base font-bold">
+                      <span className="ml-2 font-mono text-base font-bold text-white">
                         XGBoost + Live
                       </span>
                     </div>
@@ -820,13 +775,13 @@ export default function FlightMapPage() {
                 </div>
 
                 {/* Legend */}
-                <div className="absolute bottom-12 right-3 flex flex-col gap-1.5 text-[9px] text-[#6B7B8D]">
+                <div className="absolute bottom-12 right-3 flex flex-col gap-1.5 text-[9px] text-white/50">
                   <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-[#0078D2]" />{" "}
+                    <span className="h-2 w-2 rounded-full bg-[#5CB8FF]" />{" "}
                     Inbound (A→DFW)
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-[#C8102E]" />{" "}
+                    <span className="h-2 w-2 rounded-full bg-[#FF6B7A]" />{" "}
                     Outbound (DFW→B)
                   </span>
                 </div>

@@ -141,8 +141,8 @@
 
 /* ---- Map styles ---- */
 .map-container {
-  background: #E8ECF0;
-  border: 1px solid rgba(10, 26, 58, 0.12);
+  background: #1A2A42;
+  border: 1px solid rgba(10, 26, 58, 0.3);
   border-radius: 0.75rem;
   overflow: hidden;
   position: relative;
@@ -152,40 +152,44 @@
   display: block;
 }
 
-/* Glowing airport dot pulse rings */
-@keyframes glow-pulse {
-  0% { r: 4; opacity: 0.6; }
-  50% { r: 10; opacity: 0; }
-  100% { r: 4; opacity: 0; }
+/* Smooth zoom/pan transitions on ZoomableGroup's inner <g> */
+.map-container svg > g > g {
+  transition: transform 2s cubic-bezier(0.33, 1, 0.68, 1);
 }
 
-@keyframes glow-pulse-outer {
-  0% { r: 6; opacity: 0.3; }
-  50% { r: 16; opacity: 0; }
-  100% { r: 6; opacity: 0; }
-}
-
-@keyframes dot-breathe {
-  0%, 100% { opacity: 0.85; }
-  50% { opacity: 1; }
-}
-
-/* Airport dot click target */
+/* Airport dot */
 .airport-dot {
   cursor: pointer;
-  transition: transform 0.15s ease;
-}
-.airport-dot:hover {
-  transform: scale(1.3);
+  transition: opacity 0.2s ease;
 }
 
-/* Airport label glow */
+/* Labels */
 .airport-label {
-  filter: drop-shadow(0 0 2px rgba(10, 26, 58, 0.3));
   pointer-events: none;
 }
-.airport-label-selected {
-  filter: drop-shadow(0 0 6px rgba(200, 16, 46, 0.8));
+.airport-label-hub {
+  pointer-events: none;
+}
+
+/* Selected halo — single CSS pulse instead of SVG <animate> */
+@keyframes halo-pulse {
+  0%, 100% { opacity: 0.12; transform: scale(1); }
+  50% { opacity: 0.22; transform: scale(1.3); }
+}
+.selected-halo {
+  animation: halo-pulse 2.5s ease-in-out infinite;
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+/* DFW subtle pulse */
+@keyframes dfw-pulse {
+  0%, 100% { filter: drop-shadow(0 0 3px rgba(200,16,46,0.4)); }
+  50% { filter: drop-shadow(0 0 8px rgba(200,16,46,0.7)); }
+}
+.dfw-dot {
+  animation: dfw-pulse 3s ease-in-out infinite;
+  will-change: filter;
 }
 
 /* Airport popup */
@@ -226,13 +230,14 @@
 
 /* Map bottom bar */
 .map-bottom-bar {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(10, 26, 58, 0.75);
   backdrop-filter: blur(8px);
-  border-top: 1px solid rgba(10, 26, 58, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0.75rem 1.25rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  color: #FFFFFF;
 }
 
 /* ---- Page toggle ---- */
@@ -270,35 +275,65 @@
   border-radius: 1px;
 }
 
-/* ---- Animated flight path beam ---- */
+/* ---- Flight path beam animations ---- */
+
+/* Shoot-in: draws the path from start to end */
 @keyframes beam-shoot {
-  0% { stroke-dashoffset: 1000; }
-  100% { stroke-dashoffset: 0; }
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
 }
 
-@keyframes beam-glow-pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.7; }
+/* Gentle idle pulse after the beam is drawn */
+@keyframes beam-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
 }
 
-@keyframes plane-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+/* Glow breath */
+@keyframes glow-breath {
+  0%, 100% { opacity: 0.08; }
+  50%      { opacity: 0.18; }
 }
 
-.flight-path-beam {
-  stroke-dasharray: 1000;
-  animation: beam-shoot 1.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  filter: url(#glow-filter);
+/* Beam container — GPU layer */
+.beam-group {
+  will-change: opacity;
 }
 
-.flight-path-glow {
-  animation: beam-glow-pulse 2s ease-in-out infinite;
-  filter: url(#glow-filter-wide);
+/* Wide soft glow behind the beam */
+.beam-glow {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0.12;
+  animation:
+    beam-shoot 1.2s cubic-bezier(0.33, 1, 0.68, 1) forwards,
+    glow-breath 3s ease-in-out 1.2s infinite;
 }
 
-.flight-plane-dot {
-  animation: plane-pulse 1.5s ease-in-out infinite;
+/* Bright core line */
+.beam-core {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation:
+    beam-shoot 1s cubic-bezier(0.33, 1, 0.68, 1) forwards,
+    beam-pulse 2.5s ease-in-out 1s infinite;
+}
+
+/* Traveling plane — subtle pulse */
+@keyframes plane-glow {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
+}
+.traveling-plane {
+  animation: plane-glow 2s ease-in-out infinite;
+}
+
+/* Thin white center */
+.beam-white {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0.5;
+  animation: beam-shoot 0.9s cubic-bezier(0.33, 1, 0.68, 1) forwards;
 }
 
 /* ---- Smooth animations ---- */
