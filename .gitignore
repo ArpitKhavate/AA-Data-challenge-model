@@ -1,0 +1,23 @@
+# Dependencies
+frontend/node_modules/
+frontend/.next/
+
+# Raw CSV data files (too large for git)
+/data/
+notebooks/outputs/ranked_airport_pairs.csv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+
+# Env
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc

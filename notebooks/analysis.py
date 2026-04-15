@@ -814,48 +814,57 @@ if not train_pairs.empty and not test_pairs.empty:
 else:
     print("\nTemporal Holdout Validation skipped: insufficient data after split.")
 
-# Calculate domain-specific Propagation Catch Rate
-# = Of pairs where BOTH legs have above-median propagation risk,
-#   what % did the model flag?
-# This directly measures whether we solved the cascading delay problem.
-model.fit(X, y)
-pairs_clean = pairs_clean.copy()
-pairs_clean['risk_probability'] = model.predict_proba(X)[:, 1]
-pairs_clean['predicted_high'] = model.predict(X)
+# ============================================================
+# OUT-OF-FOLD PREDICTIONS (honest, not memorised)
+# ============================================================
+# Instead of training on all data and predicting the same data
+# (which inflates probabilities and confidence), we collect
+# predictions from held-out folds. Each pair's score comes from
+# a model that NEVER saw that pair during training.
 
+pairs_clean = pairs_clean.copy()
+oof_probs = np.zeros(len(X))
+oof_preds = np.zeros(len(X), dtype=int)
+
+print("\nGenerating out-of-fold predictions (5-fold)...")
+skf_oof = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+for fold_i, (train_idx, test_idx) in enumerate(skf_oof.split(X, y)):
+    fold_model = xgb.XGBClassifier(
+        n_estimators=100,
+        max_depth=4,
+        learning_rate=0.1,
+        scale_pos_weight=(y.iloc[train_idx] == 0).sum() / max(1, (y.iloc[train_idx] == 1).sum()),
+        random_state=42,
+        eval_metric='logloss',
+        verbosity=0
+    )
+    fold_model.fit(X.iloc[train_idx], y.iloc[train_idx])
+    oof_probs[test_idx] = fold_model.predict_proba(X.iloc[test_idx])[:, 1]
+    oof_preds[test_idx] = fold_model.predict(X.iloc[test_idx])
+    print(f"  Fold {fold_i + 1}: predicted {len(test_idx):,} held-out pairs")
+
+pairs_clean['risk_probability'] = oof_probs
+pairs_clean['predicted_high'] = oof_preds
+
+# Now train final model on full data for feature importance and export
+model.fit(X, y)
+
+# Propagation Catch Rate using honest OOF predictions
 both_prop_mask = pairs_clean['both_propagation_prone'] == 1
 if both_prop_mask.sum() > 0:
     prop_catch = (
         pairs_clean.loc[both_prop_mask, 'predicted_high'].sum() /
         both_prop_mask.sum()
     )
-    print(f"Propagation Catch Rate: {prop_catch:.2f}  "
+    print(f"\nPropagation Catch Rate (OOF): {prop_catch:.2f}  "
           f"<-- % of double-cascade pairs flagged (domain metric)")
 else:
-    print("Propagation Catch Rate: N/A (no double-cascade pairs found)")
+    print("\nPropagation Catch Rate: N/A (no double-cascade pairs found)")
 
-# ---- NEW: FAA DUTY HOUR VIOLATION PROBABILITY ----
-# FAA regulations: 14-hour duty limit, 10-hour minimum rest required
-# A typical A->DFW->B sequence uses ~8 hours scheduled time
-# Each minute of delay reduces remaining buffer before duty limit
-# If combined_duty_burden (total delay minutes) > ~360 mins (6 hours),
-# pilot is in danger of violating duty limits
-#
-# This is a concrete operationalization of the "duty time violations" objective
-
-DUTY_LIMIT_MINUTES = 14 * 60  # 840 minutes
-SCHEDULED_TIME_MINUTES = 8 * 60  # 480 minutes
-THRESHOLD_BUFFER = 360  # 6 hours
+# ---- FAA DUTY HOUR VIOLATION PROBABILITY ----
+THRESHOLD_BUFFER = 360  # 6 hours of delay = danger zone
 
 def calc_duty_violation_prob(duty_burden):
-    """
-    Estimate probability pilot violates 14-hour duty limit.
-    duty_burden = total delay minutes from all sources
-    """
-    # If duty burden < 360 mins, very unlikely to violate (prob ~ 0.05)
-    # If duty burden = 360-600 mins, moderate risk (prob ~ 0.3-0.6)
-    # If duty burden > 600 mins, very likely to violate (prob ~ 0.9)
-    # Using sigmoid fit to historical FAA violation data patterns
     violation_prob = 1.0 / (1.0 + np.exp(-0.01 * (duty_burden - THRESHOLD_BUFFER)))
     return np.clip(violation_prob, 0.0, 1.0)
 
@@ -869,23 +878,18 @@ print(f"  Pairs with >50% violation risk: "
 print(f"  Avg violation probability: "
       f"{pairs_clean['duty_violation_prob'].mean():.3f}")
 
-# ---- NEW: PREDICTION CONFIDENCE ----
-# Confidence = how certain is the model about high/low label
-# High confidence if probability is close to 0 or 1
-# Low confidence if probability is near 0.5
-PREDICT_PROBS = model.predict_proba(X)
-pairs_clean['confidence_score'] = np.abs(
-    PREDICT_PROBS[:, 1] - PREDICT_PROBS[:, 0]
-)
-# Normalize to 0-100 scale for interpretability
+# ---- PREDICTION CONFIDENCE (from OOF predictions) ----
+# Confidence = distance from the decision boundary (0.5).
+# OOF probabilities are honest — not inflated by memorisation.
+pairs_clean['confidence_score'] = np.abs(oof_probs - (1 - oof_probs))
 pairs_clean['confidence_pct'] = pairs_clean['confidence_score'] * 100
 
-print("\nPrediction Confidence:")
+print("\nPrediction Confidence (out-of-fold):")
 print(f"  Avg confidence: {pairs_clean['confidence_pct'].mean():.1f}%")
 print(f"  High confidence pairs (>80%): {(pairs_clean['confidence_pct'] > 80).sum():,}")
 print(f"  Low confidence pairs (<30%): {(pairs_clean['confidence_pct'] < 30).sum():,}")
 
-print("\nFinal model trained on full dataset")
+print("\nFinal model trained on full dataset (for feature importance export)")
 
 
 # ============================================================

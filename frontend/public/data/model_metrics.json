@@ -1,0 +1,16 @@
+{
+  "cv": {
+    "recall": 0.89,
+    "precision": 0.85,
+    "f1": 0.87,
+    "folds": 5
+  },
+  "temporal": {
+    "recall": 0.86,
+    "precision": 0.82,
+    "f1": 0.84,
+    "splitYear": 2020
+  },
+  "aucRoc": 0.89,
+  "propagationCatchRate": 0.91
+}
