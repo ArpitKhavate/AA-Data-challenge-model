@@ -152,9 +152,9 @@
   display: block;
 }
 
-/* Smooth zoom/pan transitions on ZoomableGroup's inner <g> */
-.map-container svg > g > g {
-  transition: transform 2s cubic-bezier(0.33, 1, 0.68, 1);
+/* Smooth zoom/pan — only active during programmatic zooms (class toggled by JS) */
+.map-container.smooth-zoom svg > g > g {
+  transition: transform 1.8s cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 /* Airport dot */

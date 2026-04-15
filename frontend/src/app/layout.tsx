@@ -7,7 +7,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const dmSerif = DM_Serif_Display({ variable: "--font-serif", weight: "400", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "AA Crew Sequencing Risk System",
+  title: "NavRisk — AA Crew Sequencing Risk System",
   description: "XGBoost-powered risk model identifying high-risk Airport A → DFW → Airport B pilot sequences for American Airlines crew scheduling.",
 };
 

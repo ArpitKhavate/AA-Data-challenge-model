@@ -104,9 +104,18 @@ export default function FlightMapPage() {
   const [mapZoom, setMapZoom] = useState(1);
   const [mapCenter, setMapCenter] = useState<[number, number]>([-96, 38]);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
   const [pathKey, setPathKey] = useState(0); // force re-animate
   const [metars, setMetars] = useState<MetarData[]>([]);
   const [metarLoading, setMetarLoading] = useState(false);
+
+  /** Enable smooth CSS transition, auto-disable after animation completes */
+  const triggerSmoothZoom = useCallback(() => {
+    const el = mapContainerRef.current;
+    if (!el) return;
+    el.classList.add("smooth-zoom");
+    setTimeout(() => el.classList.remove("smooth-zoom"), 2200);
+  }, []);
 
   useEffect(() => {
     Promise.all([getAirportCoords(), getAllPairs(), getNetworkSummary()]).then(
@@ -212,8 +221,9 @@ export default function FlightMapPage() {
       const a = coordMap[code];
       if (!a) return;
 
+      triggerSmoothZoom();
+
       if (airportB && code !== airportB) {
-        // Both selected — zoom to show both, hold 2s, then scroll
         const b = coordMap[airportB];
         if (b) {
           setMapCenter([(a.lon + b.lon) / 2, (a.lat + b.lat) / 2]);
@@ -226,16 +236,16 @@ export default function FlightMapPage() {
           }, 2000);
         }
       } else {
-        // Only inbound selected — zoom in briefly, hold 2s, then zoom back out
         setMapCenter(getZoomCenter(a));
         setMapZoom(2.2);
         zoomTimerRef.current = setTimeout(() => {
+          triggerSmoothZoom();
           setMapZoom(1);
           setMapCenter([-96, 38]);
         }, 2000);
       }
     },
-    [airportB, coordMap]
+    [airportB, coordMap, triggerSmoothZoom]
   );
 
   // Set as outbound (Airport B)
@@ -245,14 +255,14 @@ export default function FlightMapPage() {
       setPopup(null);
       setPathKey((k) => k + 1);
 
-      // Cancel any pending zoom-out timer from inbound
       if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
 
       const b = coordMap[code];
       if (!b) return;
 
+      triggerSmoothZoom();
+
       if (airportA && code !== airportA) {
-        // Both selected — zoom to show both paths, hold 2s, then scroll
         const a = coordMap[airportA];
         if (a) {
           setMapCenter([(a.lon + b.lon) / 2, (a.lat + b.lat) / 2]);
@@ -265,16 +275,16 @@ export default function FlightMapPage() {
           }, 2000);
         }
       } else {
-        // Only outbound selected — zoom in briefly, hold 2s, then zoom back out
         setMapCenter(getZoomCenter(b));
         setMapZoom(2.2);
         zoomTimerRef.current = setTimeout(() => {
+          triggerSmoothZoom();
           setMapZoom(1);
           setMapCenter([-96, 38]);
         }, 2000);
       }
     },
-    [airportA, coordMap]
+    [airportA, coordMap, triggerSmoothZoom]
   );
 
   const closePopup = useCallback(() => setPopup(null), []);
@@ -282,13 +292,14 @@ export default function FlightMapPage() {
   // FULL RESET
   const resetAll = useCallback(() => {
     if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+    triggerSmoothZoom();
     setAirportA(null);
     setAirportB(null);
     setPopup(null);
     setMapZoom(1);
     setMapCenter([-96, 38]);
     setPathKey((k) => k + 1);
-  }, []);
+  }, [triggerSmoothZoom]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -371,7 +382,7 @@ export default function FlightMapPage() {
               </div>
               <div>
                 <span className="text-sm font-semibold tracking-tight">
-                  CrewRisk
+                  <span className="text-[#0078D2]">Nav</span><span className="text-[#C8102E]">Risk</span>
                 </span>
                 <span className="ml-1.5 text-[10px] uppercase tracking-widest text-white/50">
                   AA Analytics
@@ -401,8 +412,7 @@ export default function FlightMapPage() {
                 className="text-4xl font-normal tracking-tight leading-none"
                 style={{ fontFamily: "var(--font-serif)" }}
               >
-                Navigate{" "}
-                <span className="text-[#C8102E]">Risk</span>
+                <span className="text-[#0078D2]">Nav</span><span className="text-[#C8102E]">Risk</span>
               </h1>
               <p className="mt-1 text-sm text-[#6B7B8D]">
                 Explore pilot crew sequence risk across the American Airlines DFW hub network
@@ -431,11 +441,12 @@ export default function FlightMapPage() {
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+          <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
             {/* --- Map + Controls column --- */}
             <div className="space-y-4">
               {/* Map container */}
               <div
+                ref={mapContainerRef}
                 className="map-container relative animate-fade-in-up"
                 style={{ animationDelay: "0.05s", aspectRatio: "16/10" }}
               >
@@ -925,7 +936,7 @@ export default function FlightMapPage() {
               </div>
             </div>
 
-            {/* --- Right panel: Metrics & Info --- */}
+            {/* --- Right sidebar: KPIs + Prompt --- */}
             <div
               className="space-y-4 animate-fade-in-up"
               style={{ animationDelay: "0.1s" }}
@@ -966,295 +977,8 @@ export default function FlightMapPage() {
                 </div>
               )}
 
-              {/* Instructions or Results */}
-              {bothSelected && result && riskInfo ? (
-                <div ref={resultsRef} className="space-y-4 animate-slide-in">
-                  {/* Risk score */}
-                  <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D]">
-                        Sequence Risk
-                      </h3>
-                      <span
-                        className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-                        style={{
-                          color: riskInfo.color,
-                          backgroundColor: riskInfo.bgColor,
-                        }}
-                      >
-                        {riskInfo.label}
-                      </span>
-                    </div>
-                    <div className="text-center mb-4">
-                      <p
-                        className="text-4xl font-bold font-mono"
-                        style={{ color: riskInfo.color }}
-                      >
-                        {(result.r * 100).toFixed(1)}%
-                      </p>
-                      <p className="text-xs text-[#6B7B8D] mt-1 font-mono">
-                        {airportA} → DFW → {airportB} · {season}
-                      </p>
-                    </div>
-                    <div className="space-y-2.5 border-t border-[#0A1A3A]/6 pt-3">
-                      <MetricRow
-                        icon={
-                          <Shield className="h-3.5 w-3.5 text-[#0078D2]" />
-                        }
-                        label="Confidence"
-                        value={`${calibrateConfidence(result.c).toFixed(0)}%`}
-                      />
-                      <MetricRow
-                        icon={
-                          <Clock className="h-3.5 w-3.5 text-[#D4880F]" />
-                        }
-                        label="Duty Violation"
-                        value={`${(result.d * 100).toFixed(1)}%`}
-                      />
-                      <MetricRow
-                        icon={
-                          <AlertTriangle className="h-3.5 w-3.5 text-[#534AB7]" />
-                        }
-                        label="Turnaround Risk"
-                        value={result.mt.toFixed(4)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* ---- LIVE WEATHER CONDITIONS ---- */}
-                  {(metarA || metarB || metarLoading) && (
-                    <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
-                        <Cloud className="h-3.5 w-3.5" />
-                        Live Weather — AWC METAR
-                      </h3>
-                      {metarLoading ? (
-                        <div className="flex items-center gap-2 text-xs text-[#6B7B8D]">
-                          <div className="h-3 w-3 animate-spin rounded-full border border-[#6B7B8D] border-t-transparent" />
-                          Fetching live conditions...
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {[metarA, metarB].map((m) => {
-                            if (!m) return null;
-                            const isA = m.iataCode === airportA;
-                            const catColors = FLT_CAT_COLORS[m.fltCat] ?? FLT_CAT_COLORS.VFR;
-                            return (
-                              <div key={m.icaoId} className="rounded-lg border border-[#0A1A3A]/6 p-3">
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-semibold font-mono" style={{ color: isA ? "#0078D2" : "#C8102E" }}>
-                                    {m.iataCode} {isA ? "(Inbound)" : "(Outbound)"}
-                                  </span>
-                                  <span
-                                    className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-                                    style={{ color: catColors.text, backgroundColor: catColors.bg }}
-                                  >
-                                    {m.fltCat}
-                                  </span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2 text-[11px]">
-                                  <div className="flex items-center gap-1 text-[#6B7B8D]">
-                                    <Wind className="h-3 w-3" />
-                                    <span>{m.wspd ?? 0}kt{m.wgst ? ` G${m.wgst}` : ""}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1 text-[#6B7B8D]">
-                                    <Eye className="h-3 w-3" />
-                                    <span>{m.visib ?? "—"}sm</span>
-                                  </div>
-                                  <div className="flex items-center gap-1 text-[#6B7B8D]">
-                                    <Cloud className="h-3 w-3" />
-                                    <span>{m.base ? `${m.base}ft` : "CLR"}</span>
-                                  </div>
-                                </div>
-                                {m.wxString && (
-                                  <div className="mt-1.5 flex items-center gap-1">
-                                    <Zap className="h-3 w-3 text-[#D4880F]" />
-                                    <span className="text-[11px] font-semibold text-[#D4880F]">{m.wxString}</span>
-                                  </div>
-                                )}
-                                <p className="mt-2 font-mono text-[9px] text-[#6B7B8D]/70 leading-relaxed break-all">
-                                  {m.rawOb}
-                                </p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ---- LIVE-ADJUSTED RISK ---- */}
-                  {liveRisk && liveRisk.multiplier > 1 && liveRiskInfo && (
-                    <div
-                      className="rounded-xl border-2 p-5"
-                      style={{
-                        borderColor: liveRiskInfo.color,
-                        backgroundColor: liveRiskInfo.bgColor,
-                      }}
-                    >
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
-                        <TrendingUp className="h-3.5 w-3.5" />
-                        Live-Adjusted Risk
-                      </h3>
-                      <div className="flex items-baseline gap-3 mb-2">
-                        <p
-                          className="text-3xl font-bold font-mono"
-                          style={{ color: liveRiskInfo.color }}
-                        >
-                          {(liveRisk.adjusted * 100).toFixed(1)}%
-                        </p>
-                        <span className="text-xs font-mono text-[#6B7B8D] line-through">
-                          {(result.r * 100).toFixed(1)}%
-                        </span>
-                        <span
-                          className="text-xs font-bold font-mono"
-                          style={{ color: liveRiskInfo.color }}
-                        >
-                          +{((liveRisk.adjusted - result.r) * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        {liveRisk.reasons.map((r, i) => (
-                          <p key={i} className="text-[11px] text-[#3A4A5A] flex items-center gap-1.5">
-                            <AlertTriangle className="h-3 w-3 shrink-0" style={{ color: liveRiskInfo.color }} />
-                            {r}
-                          </p>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-[10px] text-[#6B7B8D]">
-                        Weather multiplier: {liveRisk.multiplier}x — sourced from aviationweather.gov METAR
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Severity Matrix */}
-                  <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
-                      Risk Severity Matrix
-                    </h3>
-                    <div className="space-y-3">
-                      {breakdown.map((b) => (
-                        <div key={b.name}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-medium">
-                              {b.name}
-                            </span>
-                            <span className="text-xs font-mono font-semibold">
-                              {b.pct.toFixed(0)}%
-                            </span>
-                          </div>
-                          <div className="severity-bar">
-                            <div
-                              className="severity-bar-fill"
-                              style={{
-                                width: `${b.pct}%`,
-                                backgroundColor: b.color,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* ---- DELAY PROPAGATION EXPLANATION ---- */}
-                  <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
-                      <Info className="h-3.5 w-3.5" />
-                      Delay Propagation Logic
-                    </h3>
-                    <div className="space-y-3 text-xs leading-relaxed text-[#3A4A5A]">
-                      <p>
-                        <span className="font-semibold text-[#0A1A3A]">How cascading delays work:</span>{" "}
-                        When the inbound flight from{" "}
-                        <span className="font-mono font-semibold text-[#0078D2]">{airportA}</span>{" "}
-                        arrives late at DFW, the turnaround window shrinks. If the crew
-                        can&apos;t turn the aircraft fast enough, the outbound flight to{" "}
-                        <span className="font-mono font-semibold text-[#C8102E]">{airportB}</span>{" "}
-                        departs late — the delay has <em>propagated</em>.
-                      </p>
-                      <div className="flex items-center gap-2 rounded-lg bg-[#E8ECF0] px-3 py-2 font-mono text-[11px]">
-                        <span className="text-[#0078D2] font-bold">{airportA}</span>
-                        <span className="text-[#6B7B8D]">→ late →</span>
-                        <span className="font-bold text-[#C8102E]">DFW</span>
-                        <span className="text-[#6B7B8D]">→ short turn →</span>
-                        <span className="text-[#C8102E] font-bold">{airportB}</span>
-                        <span className="text-[#6B7B8D]">= cascaded delay</span>
-                      </div>
-                      <p>
-                        The model uses <span className="font-semibold">late_aircraft_delay</span> from
-                        BTS data — measuring how often a late-arriving aircraft caused the
-                        <em> next</em> departure to be delayed. The{" "}
-                        <span className="font-semibold">combined_propagation</span> score (
-                        <span className="font-mono font-semibold">
-                          {result.cp.toFixed(1)}
-                        </span>
-                        ) sums both airports&apos; cascading tendencies. Higher values mean both
-                        legs are historically prone to passing delays forward.
-                      </p>
-                      <p>
-                        Combined with duty burden (
-                        <span className="font-mono font-semibold">
-                          {result.cd.toFixed(1)}
-                        </span>{" "}
-                        total delay minutes), the pilot risks hitting the FAA 14-hour duty
-                        limit, making the sequence operationally dangerous.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* XGBoost reasoning */}
-                  <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
-                      Why This Sequence Is{" "}
-                      <span style={{ color: riskInfo.color }}>
-                        {result.r >= 0.7
-                          ? "Flagged"
-                          : result.r >= 0.4
-                          ? "Cautioned"
-                          : "Accepted"}
-                      </span>
-                    </h3>
-                    <p className="text-sm leading-relaxed text-[#3A4A5A]">
-                      The XGBoost model scored{" "}
-                      <span className="font-mono font-semibold">
-                        {airportA}→DFW→{airportB}
-                      </span>{" "}
-                      at{" "}
-                      <span
-                        className="font-mono font-semibold"
-                        style={{ color: riskInfo.color }}
-                      >
-                        {(result.r * 100).toFixed(1)}%
-                      </span>{" "}
-                      risk probability. The primary driver is{" "}
-                      <span className="font-semibold">
-                        {breakdown.reduce((a, b) =>
-                          a.pct > b.pct ? a : b
-                        ).name.toLowerCase()}
-                      </span>{" "}
-                      (
-                      {breakdown
-                        .reduce((a, b) => (a.pct > b.pct ? a : b))
-                        .pct.toFixed(0)}
-                      % contribution).
-                    </p>
-                    <div
-                      className="mt-3 rounded-lg p-3 text-xs leading-relaxed"
-                      style={{
-                        backgroundColor: riskInfo.bgColor,
-                        color: riskInfo.color,
-                      }}
-                    >
-                      {result.r >= 0.7
-                        ? `⚠ This pair should NOT be included in pilot crew sequences. The combined duty burden and propagation risk make it dangerous for ${season.toLowerCase()} operations.`
-                        : result.r >= 0.4
-                        ? `⚡ This pair should be monitored closely. Consider adding turnaround buffer time during ${season.toLowerCase()} scheduling.`
-                        : `✓ This pair is generally acceptable for crew scheduling. Historical data shows manageable risk levels during ${season.toLowerCase()}.`}
-                    </div>
-                  </div>
-                </div>
-              ) : (
+              {/* Prompt / pair not found */}
+              {!bothSelected && (
                 <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-8 text-center">
                   <Plane className="h-10 w-10 mx-auto mb-3 text-[#6B7B8D]/20 -rotate-45" />
                   <h3 className="text-sm font-semibold mb-1">
@@ -1274,13 +998,8 @@ export default function FlightMapPage() {
                   </p>
                 </div>
               )}
-
-              {/* Pair not found */}
               {bothSelected && !result && (
-                <div
-                  ref={resultsRef}
-                  className="rounded-xl border border-[#D4880F]/30 bg-[#D4880F]/5 p-5 text-center"
-                >
+                <div className="rounded-xl border border-[#D4880F]/30 bg-[#D4880F]/5 p-5 text-center">
                   <p className="text-sm font-semibold text-[#D4880F]">
                     Pair Not Found
                   </p>
@@ -1290,8 +1009,285 @@ export default function FlightMapPage() {
                   </p>
                 </div>
               )}
+              {bothSelected && result && riskInfo && (
+                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D]">
+                      Sequence Risk
+                    </h3>
+                    <span
+                      className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                      style={{
+                        color: riskInfo.color,
+                        backgroundColor: riskInfo.bgColor,
+                      }}
+                    >
+                      {riskInfo.label}
+                    </span>
+                  </div>
+                  <div className="text-center mb-4">
+                    <p
+                      className="text-4xl font-bold font-mono"
+                      style={{ color: riskInfo.color }}
+                    >
+                      {(result.r * 100).toFixed(1)}%
+                    </p>
+                    <p className="text-xs text-[#6B7B8D] mt-1 font-mono">
+                      {airportA} → DFW → {airportB} · {season}
+                    </p>
+                  </div>
+                  <div className="space-y-2.5 border-t border-[#0A1A3A]/6 pt-3">
+                    <MetricRow
+                      icon={<Shield className="h-3.5 w-3.5 text-[#0078D2]" />}
+                      label="Confidence"
+                      value={`${calibrateConfidence(result.c).toFixed(0)}%`}
+                    />
+                    <MetricRow
+                      icon={<Clock className="h-3.5 w-3.5 text-[#D4880F]" />}
+                      label="Duty Violation"
+                      value={`${(result.d * 100).toFixed(1)}%`}
+                    />
+                    <MetricRow
+                      icon={<AlertTriangle className="h-3.5 w-3.5 text-[#534AB7]" />}
+                      label="Turnaround Risk"
+                      value={result.mt.toFixed(4)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+
+          {/* ---- DETAILED RESULTS (below the map row) ---- */}
+          {bothSelected && result && riskInfo && (
+            <div ref={resultsRef} className="mt-6 animate-fade-in-up">
+              <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
+                {/* ---- LIVE WEATHER CONDITIONS ---- */}
+                {(metarA || metarB || metarLoading) && (
+                  <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
+                      <Cloud className="h-3.5 w-3.5" />
+                      Live Weather — AWC METAR
+                    </h3>
+                    {metarLoading ? (
+                      <div className="flex items-center gap-2 text-xs text-[#6B7B8D]">
+                        <div className="h-3 w-3 animate-spin rounded-full border border-[#6B7B8D] border-t-transparent" />
+                        Fetching live conditions...
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {[metarA, metarB].map((m) => {
+                          if (!m) return null;
+                          const isA = m.iataCode === airportA;
+                          const catColors = FLT_CAT_COLORS[m.fltCat] ?? FLT_CAT_COLORS.VFR;
+                          return (
+                            <div key={m.icaoId} className="rounded-lg border border-[#0A1A3A]/6 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-semibold font-mono" style={{ color: isA ? "#0078D2" : "#C8102E" }}>
+                                  {m.iataCode} {isA ? "(Inbound)" : "(Outbound)"}
+                                </span>
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                                  style={{ color: catColors.text, backgroundColor: catColors.bg }}
+                                >
+                                  {m.fltCat}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 text-[11px]">
+                                <div className="flex items-center gap-1 text-[#6B7B8D]">
+                                  <Wind className="h-3 w-3" />
+                                  <span>{m.wspd ?? 0}kt{m.wgst ? ` G${m.wgst}` : ""}</span>
+                                </div>
+                                <div className="flex items-center gap-1 text-[#6B7B8D]">
+                                  <Eye className="h-3 w-3" />
+                                  <span>{m.visib ?? "—"}sm</span>
+                                </div>
+                                <div className="flex items-center gap-1 text-[#6B7B8D]">
+                                  <Cloud className="h-3 w-3" />
+                                  <span>{m.base ? `${m.base}ft` : "CLR"}</span>
+                                </div>
+                              </div>
+                              {m.wxString && (
+                                <div className="mt-1.5 flex items-center gap-1">
+                                  <Zap className="h-3 w-3 text-[#D4880F]" />
+                                  <span className="text-[11px] font-semibold text-[#D4880F]">{m.wxString}</span>
+                                </div>
+                              )}
+                              <p className="mt-2 font-mono text-[9px] text-[#6B7B8D]/70 leading-relaxed break-all">
+                                {m.rawOb}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ---- LIVE-ADJUSTED RISK ---- */}
+                {liveRisk && liveRisk.multiplier > 1 && liveRiskInfo && (
+                  <div
+                    className="rounded-xl border-2 p-5"
+                    style={{
+                      borderColor: liveRiskInfo.color,
+                      backgroundColor: liveRiskInfo.bgColor,
+                    }}
+                  >
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
+                      <TrendingUp className="h-3.5 w-3.5" />
+                      Live-Adjusted Risk
+                    </h3>
+                    <div className="flex items-baseline gap-3 mb-2">
+                      <p
+                        className="text-3xl font-bold font-mono"
+                        style={{ color: liveRiskInfo.color }}
+                      >
+                        {(liveRisk.adjusted * 100).toFixed(1)}%
+                      </p>
+                      <span className="text-xs font-mono text-[#6B7B8D] line-through">
+                        {(result.r * 100).toFixed(1)}%
+                      </span>
+                      <span
+                        className="text-xs font-bold font-mono"
+                        style={{ color: liveRiskInfo.color }}
+                      >
+                        +{((liveRisk.adjusted - result.r) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {liveRisk.reasons.map((r, i) => (
+                        <p key={i} className="text-[11px] text-[#3A4A5A] flex items-center gap-1.5">
+                          <AlertTriangle className="h-3 w-3 shrink-0" style={{ color: liveRiskInfo.color }} />
+                          {r}
+                        </p>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[10px] text-[#6B7B8D]">
+                      Weather multiplier: {liveRisk.multiplier}x — sourced from aviationweather.gov METAR
+                    </p>
+                  </div>
+                )}
+
+                {/* Severity Matrix */}
+                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
+                    Risk Severity Matrix
+                  </h3>
+                  <div className="space-y-3">
+                    {breakdown.map((b) => (
+                      <div key={b.name}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-medium">
+                            {b.name}
+                          </span>
+                          <span className="text-xs font-mono font-semibold">
+                            {b.pct.toFixed(0)}%
+                          </span>
+                        </div>
+                        <div className="severity-bar">
+                          <div
+                            className="severity-bar-fill"
+                            style={{
+                              width: `${b.pct}%`,
+                              backgroundColor: b.color,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ---- DELAY PROPAGATION EXPLANATION ---- */}
+                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
+                    <Info className="h-3.5 w-3.5" />
+                    Delay Propagation Logic
+                  </h3>
+                  <div className="space-y-3 text-xs leading-relaxed text-[#3A4A5A]">
+                    <p>
+                      <span className="font-semibold text-[#0A1A3A]">How cascading delays work:</span>{" "}
+                      When the inbound flight from{" "}
+                      <span className="font-mono font-semibold text-[#0078D2]">{airportA}</span>{" "}
+                      arrives late at DFW, the turnaround window shrinks. If the crew
+                      can&apos;t turn the aircraft fast enough, the outbound flight to{" "}
+                      <span className="font-mono font-semibold text-[#C8102E]">{airportB}</span>{" "}
+                      departs late — the delay has <em>propagated</em>.
+                    </p>
+                    <div className="flex items-center gap-2 rounded-lg bg-[#E8ECF0] px-3 py-2 font-mono text-[11px]">
+                      <span className="text-[#0078D2] font-bold">{airportA}</span>
+                      <span className="text-[#6B7B8D]">→ late →</span>
+                      <span className="font-bold text-[#C8102E]">DFW</span>
+                      <span className="text-[#6B7B8D]">→ short turn →</span>
+                      <span className="text-[#C8102E] font-bold">{airportB}</span>
+                      <span className="text-[#6B7B8D]">= cascaded delay</span>
+                    </div>
+                    <p>
+                      The model uses <span className="font-semibold">late_aircraft_delay</span> from
+                      BTS data — measuring how often a late-arriving aircraft caused the
+                      <em> next</em> departure to be delayed. The{" "}
+                      <span className="font-semibold">combined_propagation</span> score (
+                      <span className="font-mono font-semibold">
+                        {result.cp.toFixed(1)}
+                      </span>
+                      ) sums both airports&apos; cascading tendencies.
+                    </p>
+                  </div>
+                </div>
+
+                {/* XGBoost reasoning */}
+                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
+                    Why This Sequence Is{" "}
+                    <span style={{ color: riskInfo.color }}>
+                      {result.r >= 0.7
+                        ? "Flagged"
+                        : result.r >= 0.4
+                        ? "Cautioned"
+                        : "Accepted"}
+                    </span>
+                  </h3>
+                  <p className="text-sm leading-relaxed text-[#3A4A5A]">
+                    The XGBoost model scored{" "}
+                    <span className="font-mono font-semibold">
+                      {airportA}→DFW→{airportB}
+                    </span>{" "}
+                    at{" "}
+                    <span
+                      className="font-mono font-semibold"
+                      style={{ color: riskInfo.color }}
+                    >
+                      {(result.r * 100).toFixed(1)}%
+                    </span>{" "}
+                    risk probability. The primary driver is{" "}
+                    <span className="font-semibold">
+                      {breakdown.reduce((a, b) =>
+                        a.pct > b.pct ? a : b
+                      ).name.toLowerCase()}
+                    </span>{" "}
+                    (
+                    {breakdown
+                      .reduce((a, b) => (a.pct > b.pct ? a : b))
+                      .pct.toFixed(0)}
+                    % contribution).
+                  </p>
+                  <div
+                    className="mt-3 rounded-lg p-3 text-xs leading-relaxed"
+                    style={{
+                      backgroundColor: riskInfo.bgColor,
+                      color: riskInfo.color,
+                    }}
+                  >
+                    {result.r >= 0.7
+                      ? `This pair should NOT be included in pilot crew sequences. The combined duty burden and propagation risk make it dangerous for ${season.toLowerCase()} operations.`
+                      : result.r >= 0.4
+                      ? `This pair should be monitored closely. Consider adding turnaround buffer time during ${season.toLowerCase()} scheduling.`
+                      : `This pair is generally acceptable for crew scheduling. Historical data shows manageable risk levels during ${season.toLowerCase()}.`}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

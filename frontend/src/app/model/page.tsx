@@ -66,7 +66,7 @@ export default function ModelPage() {
                 <Plane className="h-4 w-4 text-white -rotate-45" />
               </div>
               <div>
-                <span className="text-sm font-semibold tracking-tight">CrewRisk</span>
+                <span className="text-sm font-semibold tracking-tight"><span className="text-[#0078D2]">Nav</span><span className="text-[#C8102E]">Risk</span></span>
                 <span className="ml-1.5 text-[10px] uppercase tracking-widest text-white/50">
                   AA Analytics
                 </span>
