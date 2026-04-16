@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef, memo } from "react";
 import Link from "next/link";
 import {
   ComposableMap,
@@ -55,6 +55,89 @@ interface PopupState {
   x: number;
   y: number;
 }
+
+/* ---- Memoized sub-components to prevent re-renders on zoom ---- */
+
+const MemoGeographies = memo(function MemoGeographies() {
+  return (
+    <Geographies geography={GEO_URL}>
+      {({ geographies }) =>
+        geographies.map((geo) => (
+          <Geography
+            key={geo.rpiKey || geo.properties?.name}
+            geography={geo}
+            fill="#243B5C"
+            stroke="#2E4A6E"
+            strokeWidth={0.5}
+            style={{
+              default: { outline: "none", cursor: "default" },
+              hover: { outline: "none", fill: "#243B5C", cursor: "default" },
+              pressed: { outline: "none", cursor: "default" },
+            }}
+          />
+        ))
+      }
+    </Geographies>
+  );
+});
+
+const AirportDot = memo(function AirportDot({
+  ap,
+  isA,
+  isB,
+  bothSelected,
+  onDotClick,
+}: {
+  ap: { code: string; lon: number; lat: number };
+  isA: boolean;
+  isB: boolean;
+  bothSelected: boolean;
+  onDotClick: (code: string, e: React.MouseEvent) => void;
+}) {
+  const isSelected = isA || isB;
+  const dimmed = bothSelected && !isSelected;
+  const dotColor = isA ? "#5CB8FF" : isB ? "#FF6B7A" : "#FFFFFF";
+  const dotR = isSelected ? 4.5 : 2.5;
+
+  return (
+    <Marker coordinates={[ap.lon, ap.lat]}>
+      {isSelected && (
+        <circle r={12} fill={dotColor} opacity={0.12} className="selected-halo" />
+      )}
+      <circle
+        r={isSelected ? 7 : 4}
+        fill={dotColor}
+        opacity={dimmed ? 0.01 : isSelected ? 0.15 : 0.06}
+      />
+      <circle
+        r={dotR}
+        fill={dotColor}
+        stroke={isSelected ? "#FFFFFF" : "none"}
+        strokeWidth={isSelected ? 1.2 : 0}
+        opacity={dimmed ? 0.06 : 1}
+        className="airport-dot"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDotClick(ap.code, e as unknown as React.MouseEvent);
+        }}
+      />
+      <text
+        textAnchor="middle"
+        y={-9}
+        style={{
+          fill: dotColor,
+          fontSize: isSelected ? 8 : 6,
+          fontWeight: isSelected ? 800 : 600,
+          fontFamily: "var(--font-geist-mono)",
+          opacity: dimmed ? 0.04 : isSelected ? 1 : 0.6,
+        }}
+        className="airport-label"
+      >
+        {ap.code}
+      </text>
+    </Marker>
+  );
+});
 
 /* ---- Projection (must match ComposableMap internals) ---- */
 const mapProjection = geoAlbersUsa().translate([MAP_W / 2, MAP_H / 2]);
@@ -130,12 +213,18 @@ export default function FlightMapPage() {
   const [metars, setMetars] = useState<MetarData[]>([]);
   const [metarLoading, setMetarLoading] = useState(false);
 
+  const programmaticZoomRef = useRef(false);
+
   /** Enable smooth CSS transition, auto-disable after animation completes */
   const triggerSmoothZoom = useCallback(() => {
     const el = mapContainerRef.current;
     if (!el) return;
+    programmaticZoomRef.current = true;
     el.classList.add("smooth-zoom");
-    setTimeout(() => el.classList.remove("smooth-zoom"), 2200);
+    setTimeout(() => {
+      el.classList.remove("smooth-zoom");
+      programmaticZoomRef.current = false;
+    }, 2000);
   }, []);
 
   useEffect(() => {
@@ -536,29 +625,13 @@ export default function FlightMapPage() {
                     minZoom={1}
                     maxZoom={5}
                     onMoveEnd={({ coordinates, zoom }) => {
+                      if (programmaticZoomRef.current) return;
                       setMapCenter(coordinates as [number, number]);
                       setMapZoom(zoom);
                     }}
                   >
-                    {/* State outlines — pointer-events disabled for performance */}
-                    <Geographies geography={GEO_URL}>
-                      {({ geographies }) =>
-                        geographies.map((geo) => (
-                          <Geography
-                            key={geo.rpiKey || geo.properties?.name}
-                            geography={geo}
-                            fill="#243B5C"
-                            stroke="#2E4A6E"
-                            strokeWidth={0.5}
-                            style={{
-                              default: { outline: "none", cursor: "default" },
-                              hover: { outline: "none", fill: "#243B5C", cursor: "default" },
-                              pressed: { outline: "none", cursor: "default" },
-                            }}
-                          />
-                        ))
-                      }
-                    </Geographies>
+                    {/* State outlines — memoized for performance */}
+                    <MemoGeographies />
 
                     {/* ---- ANIMATED CURVED FLIGHT PATHS ---- */}
                     {arcPaths.map((arc) => {
@@ -652,77 +725,17 @@ export default function FlightMapPage() {
                       </text>
                     </Marker>
 
-                    {/* Airport dots — no per-dot animations for perf */}
-                    {coords.map((ap) => {
-                      const isA = ap.code === airportA;
-                      const isB = ap.code === airportB;
-                      const isSelected = isA || isB;
-                      const dimmed = bothSelected && !isSelected;
-                      const dotColor = isA
-                        ? "#5CB8FF"
-                        : isB
-                        ? "#FF6B7A"
-                        : "#FFFFFF";
-                      const dotR = isSelected ? 4.5 : 2.5;
-
-                      return (
-                        <Marker
-                          key={`dot-${ap.code}`}
-                          coordinates={[ap.lon, ap.lat]}
-                        >
-                          {/* Static halo — only visible when selected */}
-                          {isSelected && (
-                            <circle
-                              r={12}
-                              fill={dotColor}
-                              opacity={0.12}
-                              className="selected-halo"
-                            />
-                          )}
-                          {/* Soft static glow ring */}
-                          <circle
-                            r={isSelected ? 7 : 4}
-                            fill={dotColor}
-                            opacity={dimmed ? 0.01 : isSelected ? 0.15 : 0.06}
-                          />
-                          {/* Core dot */}
-                          <circle
-                            r={dotR}
-                            fill={dotColor}
-                            stroke={isSelected ? "#FFFFFF" : "none"}
-                            strokeWidth={isSelected ? 1.2 : 0}
-                            opacity={dimmed ? 0.06 : 1}
-                            className="airport-dot"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDotClick(
-                                ap.code,
-                                e as unknown as React.MouseEvent
-                              );
-                            }}
-                          />
-                          {/* Label — only show for selected or on hover via CSS */}
-                          <text
-                            textAnchor="middle"
-                            y={-9}
-                            style={{
-                              fill: dotColor,
-                              fontSize: isSelected ? 8 : 6,
-                              fontWeight: isSelected ? 800 : 600,
-                              fontFamily: "var(--font-geist-mono)",
-                              opacity: dimmed
-                                ? 0.04
-                                : isSelected
-                                ? 1
-                                : 0.6,
-                            }}
-                            className="airport-label"
-                          >
-                            {ap.code}
-                          </text>
-                        </Marker>
-                      );
-                    })}
+                    {/* Airport dots — memoized per-dot to avoid full-list re-renders */}
+                    {coords.map((ap) => (
+                      <AirportDot
+                        key={`dot-${ap.code}`}
+                        ap={ap}
+                        isA={ap.code === airportA}
+                        isB={ap.code === airportB}
+                        bothSelected={bothSelected}
+                        onDotClick={handleDotClick}
+                      />
+                    ))}
                   </ZoomableGroup>
                 </ComposableMap>
 

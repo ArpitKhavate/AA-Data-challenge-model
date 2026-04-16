@@ -152,9 +152,18 @@
   display: block;
 }
 
+/* GPU-promote the map SVG at all times so compositing is pre-warmed */
+.map-container svg {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+.map-container svg > g > g {
+  will-change: transform;
+}
+
 /* Smooth zoom/pan — only active during programmatic zooms (class toggled by JS) */
 .map-container.smooth-zoom svg > g > g {
-  transition: transform 1.8s cubic-bezier(0.33, 1, 0.68, 1);
+  transition: transform 1.6s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 /* Airport dot */
