@@ -81,15 +81,36 @@ function buildArcPath(
   return `M ${from[0]},${from[1]} Q ${cpX},${cpY} ${to[0]},${to[1]}`;
 }
 
-/** Compute zoom center between an airport and DFW */
+/** True when coordinates lie in Alaska or Hawaii (outside CONUS) */
+function isNonConus(coord: { lon: number; lat: number }): boolean {
+  return coord.lat > 50 || coord.lat < 25;
+}
+
+/** Safe zoom center — falls back to full-US view for AK/HI airports */
 function getZoomCenter(
   airportCoord: { lon: number; lat: number } | undefined
-): [number, number] {
-  if (!airportCoord) return [-96, 38];
-  return [
-    (airportCoord.lon + DFW_COORD.lon) / 2,
-    (airportCoord.lat + DFW_COORD.lat) / 2,
-  ];
+): { center: [number, number]; zoom: number } {
+  if (!airportCoord) return { center: [-96, 38], zoom: 1 };
+  if (isNonConus(airportCoord)) return { center: [-96, 38], zoom: 1 };
+  return {
+    center: [
+      (airportCoord.lon + DFW_COORD.lon) / 2,
+      (airportCoord.lat + DFW_COORD.lat) / 2,
+    ],
+    zoom: 2.2,
+  };
+}
+
+/** Safe zoom for two airports — falls back to full-US when either is AK/HI */
+function getZoomCenterPair(
+  a: { lon: number; lat: number },
+  b: { lon: number; lat: number }
+): { center: [number, number]; zoom: number } {
+  if (isNonConus(a) || isNonConus(b)) return { center: [-96, 38], zoom: 1 };
+  return {
+    center: [(a.lon + b.lon) / 2, (a.lat + b.lat) / 2],
+    zoom: 2.2,
+  };
 }
 
 export default function FlightMapPage() {
@@ -226,8 +247,9 @@ export default function FlightMapPage() {
       if (airportB && code !== airportB) {
         const b = coordMap[airportB];
         if (b) {
-          setMapCenter([(a.lon + b.lon) / 2, (a.lat + b.lat) / 2]);
-          setMapZoom(2.2);
+          const z = getZoomCenterPair(a, b);
+          setMapCenter(z.center);
+          setMapZoom(z.zoom);
           setTimeout(() => {
             resultsRef.current?.scrollIntoView({
               behavior: "smooth",
@@ -236,8 +258,9 @@ export default function FlightMapPage() {
           }, 2000);
         }
       } else {
-        setMapCenter(getZoomCenter(a));
-        setMapZoom(2.2);
+        const z = getZoomCenter(a);
+        setMapCenter(z.center);
+        setMapZoom(z.zoom);
         zoomTimerRef.current = setTimeout(() => {
           triggerSmoothZoom();
           setMapZoom(1);
@@ -265,8 +288,9 @@ export default function FlightMapPage() {
       if (airportA && code !== airportA) {
         const a = coordMap[airportA];
         if (a) {
-          setMapCenter([(a.lon + b.lon) / 2, (a.lat + b.lat) / 2]);
-          setMapZoom(2.2);
+          const z = getZoomCenterPair(a, b);
+          setMapCenter(z.center);
+          setMapZoom(z.zoom);
           setTimeout(() => {
             resultsRef.current?.scrollIntoView({
               behavior: "smooth",
@@ -275,8 +299,9 @@ export default function FlightMapPage() {
           }, 2000);
         }
       } else {
-        setMapCenter(getZoomCenter(b));
-        setMapZoom(2.2);
+        const z = getZoomCenter(b);
+        setMapCenter(z.center);
+        setMapZoom(z.zoom);
         zoomTimerRef.current = setTimeout(() => {
           triggerSmoothZoom();
           setMapZoom(1);
