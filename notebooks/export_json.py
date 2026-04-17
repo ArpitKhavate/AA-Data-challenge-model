@@ -1,5 +1,6 @@
 """Regenerate frontend JSON files from ranked_airport_pairs.csv."""
 import pandas as pd
+import numpy as np
 import json
 import os
 import networkx as nx
@@ -10,6 +11,24 @@ FRONTEND_DATA = os.path.join(os.path.dirname(SCRIPT_DIR), 'frontend', 'public', 
 
 df = pd.read_csv(os.path.join(OUTPUTS_DIR, 'ranked_airport_pairs.csv'))
 print(f"Loaded {len(df):,} pairs")
+
+# --- Temperature scaling ---
+# Raw XGBoost OOF probabilities are very confident (bimodal near 0 and 1).
+# Temperature scaling softens extreme predictions while preserving ranking,
+# giving more realistic and differentiated risk scores.
+TEMPERATURE = 3.0
+
+raw = df['risk_probability'].values
+eps = 1e-10
+clipped = np.clip(raw, eps, 1 - eps)
+logits = np.log(clipped / (1 - clipped))
+scaled_logits = logits / TEMPERATURE
+df['risk_probability'] = 1 / (1 + np.exp(-scaled_logits))
+
+print(f"Applied temperature scaling (T={TEMPERATURE})")
+print(f"  Before: min={raw.min():.6f}, max={raw.max():.6f}")
+print(f"  After:  min={df['risk_probability'].min():.6f}, max={df['risk_probability'].max():.6f}")
+print(f"  Top 10: {sorted(df['risk_probability'].nlargest(10).values, reverse=True)}")
 
 # --- all_pairs.json (slim format) ---
 slim = []
