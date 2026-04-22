@@ -25,6 +25,9 @@ logits = np.log(clipped / (1 - clipped))
 scaled_logits = logits / TEMPERATURE
 df['risk_probability'] = 1 / (1 + np.exp(-scaled_logits))
 
+# Recalculate confidence from temperature-scaled probabilities so they're consistent
+df['confidence_pct'] = np.abs(df['risk_probability'] - (1 - df['risk_probability'])) * 100
+
 print(f"Applied temperature scaling (T={TEMPERATURE})")
 print(f"  Before: min={raw.min():.6f}, max={raw.max():.6f}")
 print(f"  After:  min={df['risk_probability'].min():.6f}, max={df['risk_probability'].max():.6f}")

@@ -76,16 +76,12 @@ export const getFeatureImportance = () => fetchJson<FeatureImportance[]>("featur
 export const DFW_COORD: AirportCoord = { code: "DFW", lat: 32.8968, lon: -97.038 };
 
 /**
- * Calibrate in-sample confidence (which is inflated because XGBoost was
- * evaluated on training data) to a realistic out-of-sample range.
- * Maps the 0-100 raw value through a logistic compression so that
- * most pairs land in the 55-90% band instead of clustering at 95-100%.
+ * Confidence is derived from temperature-scaled OOF probabilities:
+ * confidence = |p - (1-p)| × 100. No additional cosmetic transformation.
+ * Values near 50% mean the model is uncertain; near 0% or 100% means decisive.
  */
 export function calibrateConfidence(rawPct: number): number {
-  const x = rawPct / 100;
-  // Sigmoid compression: pushes 0.95-1.0 cluster down to ~0.75-0.92
-  const calibrated = 0.5 + 0.45 * Math.tanh(2.5 * (x - 0.65));
-  return Math.max(0, Math.min(100, calibrated * 100));
+  return rawPct;
 }
 
 export function classifyRisk(prob: number) {
