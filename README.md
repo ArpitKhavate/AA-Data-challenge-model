@@ -5,6 +5,8 @@
 NavRisk identifies sub-optimal pilot crew sequences for American Airlines' DFW hub. Given an inbound flight (A → DFW) and an outbound flight (DFW → B), the system predicts whether that pair should be avoided in pilot scheduling to minimize delay propagation, duty time violations, missed connections, and weather risk.
 
 **Live Demo:** [aa-data-challenge-model.vercel.app](https://navrisk-by-arpit-khavate.vercel.app/)
+
+<img width="1918" height="1030" alt="NavRisk_demo" src="https://github.com/user-attachments/assets/64ddc472-f8a2-4562-81d1-b30aa05207c9" />
 ---
 
 ## How It Works
