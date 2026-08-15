@@ -26,7 +26,7 @@ import {
   type NetworkSummary,
   type MetarData,
 } from "@/lib/data";
-import { AsciiBackground } from "@/components/ascii-background";
+// AsciiBackground removed — was causing repeating text pattern bug
 import {
   Plane,
   Shield,
@@ -207,6 +207,7 @@ export default function FlightMapPage() {
   const [pathKey, setPathKey] = useState(0); // force re-animate
   const [metars, setMetars] = useState<MetarData[]>([]);
   const [metarLoading, setMetarLoading] = useState(false);
+  const [showRawMetar, setShowRawMetar] = useState(false);
 
   const programmaticZoomRef = useRef(false);
 
@@ -334,12 +335,6 @@ export default function FlightMapPage() {
           const z = getZoomCenterPair(a, b);
           setMapCenter(z.center);
           setMapZoom(z.zoom);
-          setTimeout(() => {
-            resultsRef.current?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-          }, 2000);
         }
       } else {
         const z = getZoomCenter(a);
@@ -375,12 +370,6 @@ export default function FlightMapPage() {
           const z = getZoomCenterPair(a, b);
           setMapCenter(z.center);
           setMapZoom(z.zoom);
-          setTimeout(() => {
-            resultsRef.current?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-          }, 2000);
         }
       } else {
         const z = getZoomCenter(b);
@@ -476,12 +465,10 @@ export default function FlightMapPage() {
 
   return (
     <div
-      className="relative min-h-screen"
+      className="relative min-h-screen bg-[#F8F9FA]"
       onClick={popup ? closePopup : undefined}
     >
-      <AsciiBackground />
-
-      <div className="relative z-10">
+      <div className="relative">
         {/* --- Navy top nav --- */}
         <header className="bg-[#0A1A3A] text-white">
           <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between px-6">
@@ -498,13 +485,25 @@ export default function FlightMapPage() {
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-0 border border-white/15 rounded-lg overflow-hidden">
-              <Link href="/" className="page-toggle-btn active">
-                Flight Map
-              </Link>
-              <Link href="/model" className="page-toggle-btn">
-                Model Rundown
-              </Link>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-0 border border-white/15 rounded-lg overflow-hidden">
+                <Link href="/" className="page-toggle-btn active">
+                  Flight Map
+                </Link>
+                <Link href="/model" className="page-toggle-btn">
+                  Model Rundown
+                </Link>
+              </div>
+              {network && (
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] uppercase tracking-wider text-white/50">
+                    <span className="font-mono font-bold text-white/80">{network.nodes}</span> Airports
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wider text-white/50">
+                    <span className="font-mono font-bold text-[#FF6B7A]">{network.highEdges.toLocaleString()}</span> High-Risk
+                  </span>
+                </div>
+              )}
             </div>
             <div className="text-[10px] uppercase tracking-widest text-white/40">
               GROW 26.2
@@ -527,32 +526,126 @@ export default function FlightMapPage() {
                 Explore pilot crew sequence risk across the American Airlines DFW hub network
               </p>
             </div>
-            {/* Season selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-wider text-[#6B7B8D]">
-                Season:
-              </span>
-              <div className="flex gap-0 border border-[#0A1A3A]/10 rounded-md overflow-hidden">
-                {SEASONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setSeason(s)}
-                    className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-                      season === s
-                        ? "bg-[#0A1A3A] text-white"
-                        : "text-[#6B7B8D] hover:bg-[#E8ECF0]"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
-            {/* --- Map + Controls column --- */}
-            <div className="space-y-4">
+
+          {/* ---- AIRPORT SELECTOR PANEL (full-width, own row) ---- */}
+          <div
+            className="mb-4 rounded-xl border border-[#0A1A3A]/8 bg-white p-5 animate-fade-in-up"
+            style={{ animationDelay: "0.05s" }}
+          >
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
+                  Select Airports — Map or Dropdown
+                </h3>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+                  {/* Inbound dropdown */}
+                  <div className="flex items-center gap-2 flex-1 min-w-[160px]">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-[#0078D2] whitespace-nowrap flex items-center gap-1">
+                      <ArrowDown className="h-3 w-3" />
+                      Inbound
+                    </label>
+                    <select
+                      className="airport-select inbound w-full"
+                      value={airportA ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v) {
+                          setInbound(v);
+                        } else {
+                          setAirportA(null);
+                        }
+                      }}
+                    >
+                      <option value="">Choose airport…</option>
+                      {airportCodes.map((code) => (
+                        <option key={code} value={code} disabled={code === airportB}>
+                          {code}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* DFW hub indicator */}
+                  <div className="flex h-9 w-12 items-center justify-center rounded-md bg-[#C8102E] text-white text-xs font-bold font-mono shrink-0">
+                    DFW
+                  </div>
+
+                  {/* Outbound dropdown */}
+                  <div className="flex items-center gap-2 flex-1 min-w-[160px]">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-[#C8102E] whitespace-nowrap flex items-center gap-1">
+                      <ArrowUp className="h-3 w-3" />
+                      Outbound
+                    </label>
+                    <select
+                      className="airport-select outbound w-full"
+                      value={airportB ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v) {
+                          setOutbound(v);
+                        } else {
+                          setAirportB(null);
+                        }
+                      }}
+                    >
+                      <option value="">Choose airport…</option>
+                      {airportCodes.map((code) => (
+                        <option key={code} value={code} disabled={code === airportA}>
+                          {code}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Reset button */}
+                  <button className="reset-btn" onClick={resetAll}>
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Reset
+                  </button>
+                </div>
+
+                {/* Current selection status */}
+                {!bothSelected && (
+                  <div className="mt-3 rounded-lg border border-dashed border-[#0A1A3A]/10 bg-[#E8ECF0]/50 px-4 py-2.5 text-center text-xs text-[#6B7B8D]">
+                    {!airportA && !airportB && (
+                      <>
+                        Select airports from the dropdowns above or click
+                        directly on the map
+                      </>
+                    )}
+                    {airportA && !airportB && (
+                      <>
+                        Inbound set:{" "}
+                        <span className="font-mono font-semibold text-[#0078D2]">
+                          {airportA}→DFW
+                        </span>
+                        . Now select an{" "}
+                        <span className="font-semibold text-[#C8102E]">
+                          outbound
+                        </span>{" "}
+                        airport.
+                      </>
+                    )}
+                    {!airportA && airportB && (
+                      <>
+                        Outbound set:{" "}
+                        <span className="font-mono font-semibold text-[#C8102E]">
+                          DFW→{airportB}
+                        </span>
+                        . Now select an{" "}
+                        <span className="font-semibold text-[#0078D2]">
+                          inbound
+                        </span>{" "}
+                        airport.
+                      </>
+                    )}
+                  </div>
+                )}
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1fr_300px] items-start">
+            {/* --- Left column: Map --- */}
+            <div>
               {/* Map container */}
               <div
                 ref={mapContainerRef}
@@ -796,14 +889,6 @@ export default function FlightMapPage() {
                         {result ? `${calibrateConfidence(result.c).toFixed(0)}%` : "—"}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-[10px] uppercase tracking-wider text-white/40">
-                        Model
-                      </span>
-                      <span className="ml-2 font-mono text-base font-bold text-white">
-                        XGBoost + Live
-                      </span>
-                    </div>
                   </div>
                   {bothSelected && (liveRiskInfo ?? riskInfo) && (
                     <span
@@ -831,184 +916,34 @@ export default function FlightMapPage() {
                 </div>
               </div>
 
-              {/* ---- AIRPORT SELECTOR PANEL (below map) ---- */}
-              <div
-                className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5 animate-fade-in-up"
-                style={{ animationDelay: "0.1s" }}
-              >
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
-                  Select Airports — Map or Dropdown
-                </h3>
-                <div className="flex flex-wrap items-end gap-4">
-                  {/* Inbound dropdown */}
-                  <div className="flex-1 min-w-[160px]">
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#0078D2] mb-1.5">
-                      <ArrowDown className="inline h-3 w-3 mr-1" />
-                      Inbound (A → DFW)
-                    </label>
-                    <select
-                      className="airport-select inbound w-full"
-                      value={airportA ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v) {
-                          setInbound(v);
-                        } else {
-                          setAirportA(null);
-                        }
-                      }}
-                    >
-                      <option value="">Choose airport…</option>
-                      {airportCodes.map((code) => (
-                        <option key={code} value={code} disabled={code === airportB}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* DFW hub indicator */}
-                  <div className="flex flex-col items-center pb-1.5">
-                    <span className="text-[9px] uppercase tracking-wider text-[#6B7B8D] mb-1">
-                      Hub
-                    </span>
-                    <div className="flex h-9 w-12 items-center justify-center rounded-md bg-[#C8102E] text-white text-xs font-bold font-mono">
-                      DFW
-                    </div>
-                  </div>
-
-                  {/* Outbound dropdown */}
-                  <div className="flex-1 min-w-[160px]">
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#C8102E] mb-1.5">
-                      <ArrowUp className="inline h-3 w-3 mr-1" />
-                      Outbound (DFW → B)
-                    </label>
-                    <select
-                      className="airport-select outbound w-full"
-                      value={airportB ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v) {
-                          setOutbound(v);
-                        } else {
-                          setAirportB(null);
-                        }
-                      }}
-                    >
-                      <option value="">Choose airport…</option>
-                      {airportCodes.map((code) => (
-                        <option key={code} value={code} disabled={code === airportA}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Season (inline) */}
-                  <div className="min-w-[120px]">
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#6B7B8D] mb-1.5">
-                      Season
-                    </label>
-                    <select
-                      className="airport-select w-full"
-                      value={season}
-                      onChange={(e) => setSeason(e.target.value)}
-                    >
-                      {SEASONS.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Reset button */}
-                  <button className="reset-btn" onClick={resetAll}>
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Reset
-                  </button>
-                </div>
-
-                {/* Current selection status */}
-                {!bothSelected && (
-                  <div className="mt-3 rounded-lg border border-dashed border-[#0A1A3A]/10 bg-[#E8ECF0]/50 px-4 py-2.5 text-center text-xs text-[#6B7B8D]">
-                    {!airportA && !airportB && (
-                      <>
-                        Select airports from the dropdowns above or click
-                        directly on the map
-                      </>
-                    )}
-                    {airportA && !airportB && (
-                      <>
-                        Inbound set:{" "}
-                        <span className="font-mono font-semibold text-[#0078D2]">
-                          {airportA}→DFW
-                        </span>
-                        . Now select an{" "}
-                        <span className="font-semibold text-[#C8102E]">
-                          outbound
-                        </span>{" "}
-                        airport.
-                      </>
-                    )}
-                    {!airportA && airportB && (
-                      <>
-                        Outbound set:{" "}
-                        <span className="font-mono font-semibold text-[#C8102E]">
-                          DFW→{airportB}
-                        </span>
-                        . Now select an{" "}
-                        <span className="font-semibold text-[#0078D2]">
-                          inbound
-                        </span>{" "}
-                        airport.
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
 
-            {/* --- Right sidebar: KPIs + Prompt --- */}
+            {/* --- Right sidebar: Season + Cards --- */}
             <div
               className="space-y-4 animate-fade-in-up"
               style={{ animationDelay: "0.1s" }}
             >
-              {/* KPI cards */}
-              {network && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="metric-card">
-                    <p className="text-[10px] uppercase tracking-wider text-[#6B7B8D] mb-0.5">
-                      Airports
-                    </p>
-                    <p className="text-lg font-bold font-mono">
-                      {network.nodes}
-                    </p>
-                  </div>
-                  <div className="metric-card">
-                    <p className="text-[10px] uppercase tracking-wider text-[#6B7B8D] mb-0.5">
-                      Pair Edges
-                    </p>
-                    <p className="text-lg font-bold font-mono">
-                      {network.edges.toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="metric-card">
-                    <p className="text-[10px] uppercase tracking-wider text-[#6B7B8D] mb-0.5">
-                      High-Risk
-                    </p>
-                    <p className="text-lg font-bold font-mono text-[#C8102E]">
-                      {network.highEdges.toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="metric-card">
-                    <p className="text-[10px] uppercase tracking-wider text-[#6B7B8D] mb-0.5">
-                      Season
-                    </p>
-                    <p className="text-lg font-bold font-mono">{season}</p>
-                  </div>
+              {/* Season selector */}
+              <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-4">
+                <span className="text-[10px] uppercase tracking-wider text-[#6B7B8D] font-semibold">
+                  Season
+                </span>
+                <div className="mt-2 flex gap-0 border border-[#0A1A3A]/10 rounded-md overflow-hidden">
+                  {SEASONS.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSeason(s)}
+                      className={`flex-1 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                        season === s
+                          ? "bg-[#0A1A3A] text-white"
+                          : "text-[#6B7B8D] hover:bg-[#E8ECF0]"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
 
               {/* Prompt / pair not found */}
               {!bothSelected && (
@@ -1088,16 +1023,73 @@ export default function FlightMapPage() {
                   </div>
                 </div>
               )}
+              {/* ---- RISK SEVERITY PIE CHART (below sequence risk) ---- */}
+              {bothSelected && result && riskInfo && (
+                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
+                    Risk Severity Matrix
+                  </h3>
+                  <RiskPieChart breakdown={breakdown} />
+                </div>
+              )}
             </div>
           </div>
 
           {/* ---- DETAILED RESULTS (below the map row) ---- */}
           {bothSelected && result && riskInfo && (
             <div ref={resultsRef} className="mt-6 animate-fade-in-up">
-              <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
+              {/* ---- VERDICT BANNER (top of results) ---- */}
+              <div className="mb-6 rounded-xl border-2 bg-white p-5" style={{ borderColor: riskInfo.color }}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-1">
+                      Why This Sequence Is{" "}
+                      <span style={{ color: riskInfo.color }}>
+                        {result.r >= 0.7 ? "Flagged" : result.r >= 0.4 ? "Cautioned" : "Accepted"}
+                      </span>
+                    </h3>
+                    <p className="text-sm leading-relaxed text-[#3A4A5A]">
+                      The XGBoost model scored{" "}
+                      <span className="font-mono font-semibold">{airportA}→DFW→{airportB}</span>{" "}
+                      at{" "}
+                      <span className="font-mono font-semibold" style={{ color: riskInfo.color }}>
+                        {(result.r * 100).toFixed(1)}%
+                      </span>{" "}
+                      risk. Primary driver:{" "}
+                      <span className="font-semibold">
+                        {breakdown.reduce((a, b) => (a.pct > b.pct ? a : b)).name.toLowerCase()}
+                      </span>{" "}
+                      ({breakdown.reduce((a, b) => (a.pct > b.pct ? a : b)).pct.toFixed(0)}% contribution).
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-3xl font-bold font-mono" style={{ color: riskInfo.color }}>
+                      {(result.r * 100).toFixed(1)}%
+                    </span>
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider"
+                      style={{ color: riskInfo.color, backgroundColor: riskInfo.bgColor }}
+                    >
+                      {riskInfo.label}
+                    </span>
+                  </div>
+                </div>
+                <div
+                  className="mt-3 rounded-lg p-3 text-xs leading-relaxed"
+                  style={{ backgroundColor: riskInfo.bgColor, color: riskInfo.color }}
+                >
+                  {result.r >= 0.7
+                    ? `This pair should NOT be included in pilot crew sequences. The combined duty burden and propagation risk make it dangerous for ${season.toLowerCase()} operations.`
+                    : result.r >= 0.4
+                    ? `This pair should be monitored closely. Consider adding turnaround buffer time during ${season.toLowerCase()} scheduling.`
+                    : `This pair is generally acceptable for crew scheduling. Historical data shows manageable risk levels during ${season.toLowerCase()}.`}
+                </div>
+              </div>
+
+              <div className="grid gap-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
                 {/* ---- LIVE WEATHER CONDITIONS ---- */}
                 {(metarA || metarB || metarLoading) && (
-                  <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                  <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5 h-full">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
                       <Cloud className="h-3.5 w-3.5" />
                       Live Weather — AWC METAR
@@ -1146,9 +1138,19 @@ export default function FlightMapPage() {
                                   <span className="text-[11px] font-semibold text-[#D4880F]">{m.wxString}</span>
                                 </div>
                               )}
-                              <p className="mt-2 font-mono text-[9px] text-[#6B7B8D]/70 leading-relaxed break-all">
-                                {m.rawOb}
-                              </p>
+                              <button
+                                type="button"
+                                className="mt-2 flex items-center gap-1 text-[10px] text-[#0078D2] hover:text-[#005FA3] font-medium transition-colors"
+                                onClick={() => setShowRawMetar((v) => !v)}
+                              >
+                                <ChevronDown className={`h-3 w-3 transition-transform ${showRawMetar ? "rotate-180" : ""}`} />
+                                {showRawMetar ? "Hide Raw Data" : "View Raw Data"}
+                              </button>
+                              {showRawMetar && (
+                                <p className="mt-1 font-mono text-[9px] text-[#6B7B8D]/70 leading-relaxed break-all">
+                                  {m.rawOb}
+                                </p>
+                              )}
                             </div>
                           );
                         })}
@@ -1160,7 +1162,7 @@ export default function FlightMapPage() {
                 {/* ---- LIVE-ADJUSTED RISK ---- */}
                 {liveRisk && liveRisk.multiplier > 1 && liveRiskInfo && (
                   <div
-                    className="rounded-xl border-2 p-5"
+                    className="rounded-xl border-2 p-5 h-full"
                     style={{
                       borderColor: liveRiskInfo.color,
                       backgroundColor: liveRiskInfo.bgColor,
@@ -1200,6 +1202,8 @@ export default function FlightMapPage() {
                     </p>
                   </div>
                 )}
+
+
 
                 {/* Severity Matrix — Pie Chart */}
                 <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
@@ -1249,22 +1253,14 @@ export default function FlightMapPage() {
                   </div>
                 </div>
 
+
                 {/* ---- DELAY PROPAGATION EXPLANATION ---- */}
-                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
+                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5 h-full">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3 flex items-center gap-1.5">
                     <Info className="h-3.5 w-3.5" />
                     Delay Propagation Logic
                   </h3>
                   <div className="space-y-3 text-xs leading-relaxed text-[#3A4A5A]">
-                    <p>
-                      <span className="font-semibold text-[#0A1A3A]">How cascading delays work:</span>{" "}
-                      When the inbound flight from{" "}
-                      <span className="font-mono font-semibold text-[#0078D2]">{airportA}</span>{" "}
-                      arrives late at DFW, the turnaround window shrinks. If the crew
-                      can&apos;t turn the aircraft fast enough, the outbound flight to{" "}
-                      <span className="font-mono font-semibold text-[#C8102E]">{airportB}</span>{" "}
-                      departs late — the delay has <em>propagated</em>.
-                    </p>
                     <div className="flex items-center gap-2 rounded-lg bg-[#E8ECF0] px-3 py-2 font-mono text-[11px]">
                       <span className="text-[#0078D2] font-bold">{airportA}</span>
                       <span className="text-[#6B7B8D]">→ late →</span>
@@ -1273,73 +1269,159 @@ export default function FlightMapPage() {
                       <span className="text-[#C8102E] font-bold">{airportB}</span>
                       <span className="text-[#6B7B8D]">= cascaded delay</span>
                     </div>
-                    <p>
-                      The model uses <span className="font-semibold">late_aircraft_delay</span> from
-                      BTS data — measuring how often a late-arriving aircraft caused the
-                      <em> next</em> departure to be delayed. The{" "}
-                      <span className="font-semibold">combined_propagation</span> score (
-                      <span className="font-mono font-semibold">
-                        {result.cp.toFixed(1)}
-                      </span>
-                      ) sums both airports&apos; cascading tendencies.
-                    </p>
+                    <ul className="space-y-1.5 list-disc list-inside text-[#3A4A5A]">
+                      <li><span className="font-semibold text-[#0A1A3A]">Shorter Turnarounds:</span> Late inbound flights reduce crew turnaround time.</li>
+                      <li><span className="font-semibold text-[#0A1A3A]">Scoring:</span> The <span className="font-mono font-semibold">{result.cp.toFixed(1)}</span> combined propagation score measures historical cascading tendencies between these specific airports.</li>
+                    </ul>
                   </div>
                 </div>
 
-                {/* XGBoost reasoning */}
-                <div className="rounded-xl border border-[#0A1A3A]/8 bg-white p-5">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B7B8D] mb-3">
-                    Why This Sequence Is{" "}
-                    <span style={{ color: riskInfo.color }}>
-                      {result.r >= 0.7
-                        ? "Flagged"
-                        : result.r >= 0.4
-                        ? "Cautioned"
-                        : "Accepted"}
-                    </span>
-                  </h3>
-                  <p className="text-sm leading-relaxed text-[#3A4A5A]">
-                    The XGBoost model scored{" "}
-                    <span className="font-mono font-semibold">
-                      {airportA}→DFW→{airportB}
-                    </span>{" "}
-                    at{" "}
-                    <span
-                      className="font-mono font-semibold"
-                      style={{ color: riskInfo.color }}
-                    >
-                      {(result.r * 100).toFixed(1)}%
-                    </span>{" "}
-                    risk probability. The primary driver is{" "}
-                    <span className="font-semibold">
-                      {breakdown.reduce((a, b) =>
-                        a.pct > b.pct ? a : b
-                      ).name.toLowerCase()}
-                    </span>{" "}
-                    (
-                    {breakdown
-                      .reduce((a, b) => (a.pct > b.pct ? a : b))
-                      .pct.toFixed(0)}
-                    % contribution).
-                  </p>
-                  <div
-                    className="mt-3 rounded-lg p-3 text-xs leading-relaxed"
-                    style={{
-                      backgroundColor: riskInfo.bgColor,
-                      color: riskInfo.color,
-                    }}
-                  >
-                    {result.r >= 0.7
-                      ? `This pair should NOT be included in pilot crew sequences. The combined duty burden and propagation risk make it dangerous for ${season.toLowerCase()} operations.`
-                      : result.r >= 0.4
-                      ? `This pair should be monitored closely. Consider adding turnaround buffer time during ${season.toLowerCase()} scheduling.`
-                      : `This pair is generally acceptable for crew scheduling. Historical data shows manageable risk levels during ${season.toLowerCase()}.`}
-                  </div>
-                </div>
               </div>
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function RiskPieChart({
+  breakdown,
+}: {
+  breakdown: { name: string; pct: number; color: string }[];
+}) {
+  const [activeSlice, setActiveSlice] = useState<string | null>(null);
+
+  const size = 160;
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = 58;
+  const labelR = r + 14;
+
+  // Build SVG arc segments
+  let cumulative = 0;
+  const slices = breakdown.map((b) => {
+    const startAngle = (cumulative / 100) * 360;
+    cumulative += b.pct;
+    const endAngle = (cumulative / 100) * 360;
+    const midAngle = (startAngle + endAngle) / 2;
+    return { ...b, startAngle, endAngle, midAngle };
+  });
+
+  function polarToCartesian(angle: number, radius: number) {
+    const rad = ((angle - 90) * Math.PI) / 180;
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  }
+
+  const handleClick = (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveSlice((prev) => (prev === name ? null : name));
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-3" onClick={() => setActiveSlice(null)}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {slices.map((s) => {
+          if (s.pct <= 0) return null;
+          const isActive = activeSlice === s.name;
+          const isDimmed = activeSlice !== null && !isActive;
+          const fillColor = isDimmed ? "#D1D5DB" : s.color;
+          const scale = isActive ? 1.06 : 1;
+
+          // Full circle edge case
+          if (s.pct >= 100) {
+            return (
+              <circle
+                key={s.name}
+                cx={cx}
+                cy={cy}
+                r={r}
+                fill={fillColor}
+                style={{ cursor: "pointer", transition: "fill 0.2s ease" }}
+                onClick={(e) => handleClick(s.name, e)}
+              />
+            );
+          }
+          const start = polarToCartesian(s.startAngle, r);
+          const end = polarToCartesian(s.endAngle, r);
+          const largeArc = s.endAngle - s.startAngle > 180 ? 1 : 0;
+          const d = `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
+
+          // Label position at midpoint of the arc
+          const labelPos = polarToCartesian(s.midAngle, labelR);
+
+          return (
+            <g key={s.name}>
+              <path
+                d={d}
+                fill={fillColor}
+                stroke="#FFFFFF"
+                strokeWidth={1.5}
+                style={{
+                  cursor: "pointer",
+                  transform: isActive ? `scale(${scale})` : "none",
+                  transformOrigin: `${cx}px ${cy}px`,
+                  transition: "fill 0.2s ease, transform 0.2s ease",
+                }}
+                onClick={(e) => handleClick(s.name, e)}
+              />
+              {isActive && (
+                <text
+                  x={labelPos.x}
+                  y={labelPos.y}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    fontFamily: "var(--font-geist-mono)",
+                    fill: s.color,
+                    pointerEvents: "none",
+                  }}
+                >
+                  {s.pct.toFixed(0)}%
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <circle cx={cx} cy={cy} r={28} fill="#FFFFFF" />
+        {activeSlice && (
+          <text
+            x={cx}
+            y={cy}
+            textAnchor="middle"
+            dominantBaseline="central"
+            style={{
+              fontSize: 8,
+              fontWeight: 600,
+              fill: "#6B7B8D",
+              pointerEvents: "none",
+            }}
+          >
+            {activeSlice.length > 10 ? activeSlice.slice(0, 9) + "…" : activeSlice}
+          </text>
+        )}
+      </svg>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 w-full">
+        {breakdown.map((b) => {
+          const isDimmed = activeSlice !== null && activeSlice !== b.name;
+          return (
+            <div
+              key={b.name}
+              className="flex items-center gap-1.5 cursor-pointer"
+              style={{ opacity: isDimmed ? 0.35 : 1, transition: "opacity 0.2s ease" }}
+              onClick={(e) => handleClick(b.name, e)}
+            >
+              <span
+                className="h-2.5 w-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: isDimmed ? "#D1D5DB" : b.color }}
+              />
+              <span className="text-[10px] text-[#3A4A5A] truncate">{b.name}</span>
+              <span className="text-[10px] font-mono font-semibold ml-auto">{b.pct.toFixed(0)}%</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
